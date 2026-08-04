@@ -176,8 +176,8 @@ public class PgVectorRetrievalPort implements RetrievalPort {
         if (!ftsEnabled || smallLibrary) {
             List<RawHit> sem = semanticSearch(queryEmbedding, validDocIds, topK * 2, threshold);
             List<RetrievalResult> result = rankSinglePath(sem, topK);
-            log.info("retrieveHybrid pure-vector path (ftsEnabled={} smallLibrary={}) topK={} semHits={} costMs={}",
-                    ftsEnabled, smallLibrary, topK, sem.size(), System.currentTimeMillis() - start);
+            log.info("retrieveHybrid pure-vector path (ftsEnabled={} smallLibrary={}) queryLen={} topK={} semHits={} costMs={}",
+                    ftsEnabled, smallLibrary, queryText.length(), topK, sem.size(), System.currentTimeMillis() - start);
             return result;
         }
 
@@ -185,8 +185,8 @@ public class PgVectorRetrievalPort implements RetrievalPort {
         List<RawHit> sem = semanticSearch(queryEmbedding, validDocIds, topK, threshold);
         List<RawHit> fts = ftsSearch(queryText, validDocIds, topK, ragConfig.ftsTsConfig());
         List<RetrievalResult> result = rrfFuse(sem, fts, rrfK, topK);
-        log.info("retrieveHybrid dual-path topK={} semHits={} ftsHits={} fused={} costMs={}",
-                topK, sem.size(), fts.size(), result.size(), System.currentTimeMillis() - start);
+        log.info("retrieveHybrid dual-path queryLen={} topK={} semHits={} ftsHits={} fused={} costMs={}",
+                queryText.length(), topK, sem.size(), fts.size(), result.size(), System.currentTimeMillis() - start);
         return result;
     }
 

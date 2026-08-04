@@ -1,5 +1,5 @@
 -- K1：KB / Document 增量字段（下一顺位迁移，不覆盖已有 V1~V18）
--- 对应 CLAUDE.md §6.1（四字段已存在，此处仅增量）/ §8.1（KnowledgeBase 增量）/ §8.2（Document 增量）
+-- 对应 AGENTS.md §6.1（四字段已存在，此处仅增量）/ §8.1（KnowledgeBase 增量）/ §8.2（Document 增量）
 -- 所有 DDL 走 Flyway（§9），禁止手改表 / 手动 ALTER（本脚本本身就是 Flyway 迁移）。
 
 -- knowledge_base 增量字段

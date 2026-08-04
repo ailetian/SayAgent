@@ -1,4 +1,4 @@
--- M5 T1：Pg 向量库 schema（替代原 @PostConstruct 运行时建表，满足 CLAUDE.md §9 Flyway 纪律）
+-- M5 T1：Pg 向量库 schema（替代原 @PostConstruct 运行时建表，满足 AGENTS.md §9 Flyway 纪律）
 -- 对应审核报告 P0-1 / P0-2：表结构必须走 Flyway；向量列必须显式建 HNSW 索引（§6.6/§6.7）
 -- 参考：06_M5 全局验收「HNSW 索引 USING hnsw (embedding vector_cosine_ops)」
 

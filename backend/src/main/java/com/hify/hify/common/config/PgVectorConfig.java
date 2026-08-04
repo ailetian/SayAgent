@@ -14,7 +14,7 @@ import javax.sql.DataSource;
  *
  * <p>大白话：MySQL 是主库（@Primary），应用启动时由 Spring 自己的 Flyway 自动配置跑 db/mysql/migration。
  * Pg 向量库（第二数据源）的 DataSource 见 {@link PgDataSourceConfig}，其表结构迁移由
- * {@link PgSchemaMigrator} 在应用启动后（ApplicationRunner）执行，满足 CLAUDE.md §9「表结构变更走 Flyway」。
+ * {@link PgSchemaMigrator} 在应用启动后（ApplicationRunner）执行，满足 AGENTS.md §9「表结构变更走 Flyway」。
  */
 @Configuration
 public class PgVectorConfig {

@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>大白话：用 @DataJpaTest 把 JPA 这一层单独拎出来跑，连真实 MySQL（application.yml 配置，
  * Flyway 自动建好 user 表），验证软删除真生效。测试在事务内执行，结束自动回滚，不污染业务数据。
  *
- * <p>命名遵循 {@code test方法_场景_预期}（CLAUDE.md §7.10 规则34）。
+ * <p>命名遵循 {@code test方法_场景_预期}（AGENTS.md §7.10 规则34）。
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)

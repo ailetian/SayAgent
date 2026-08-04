@@ -21,7 +21,7 @@ npm run preview  # 本地预览构建结果
   （端口取自 `backend/src/main/resources/application.yml` 的 `server.port`）。
 - 后端需先启动（如 `java -jar backend/target/xxx.jar` 或 `mvn spring-boot:run`）。
 
-## 目录结构（遵循 CLAUDE.md §3.3）
+## 目录结构（遵循 AGENTS.md §3.3）
 
 ```
 src/

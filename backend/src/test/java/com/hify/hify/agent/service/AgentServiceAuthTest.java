@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
  *
  * <p>大白话：增删改与「设默认」都是管理员专属操作。本测试把 SecurityContext 设成不同角色，
  * 断言——非 ADMIN / 未登录调写接口一律抛 FORBIDDEN 且不碰仓库；ADMIN 放行落库。
- * 命名遵循 {@code test方法_场景_预期}（CLAUDE.md §7.10 规则34）。
+ * 命名遵循 {@code test方法_场景_预期}（AGENTS.md §7.10 规则34）。
  */
 @ExtendWith(MockitoExtension.class)
 class AgentServiceAuthTest {

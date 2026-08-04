@@ -328,7 +328,7 @@ class PgVectorRetrievalPortTest {
         // 有效文档数 < 100 → 小库退化纯向量，即使 fts 开启也不发 FTS SQL
         stubEmbedding("查询");
         when(documentRepository.findIdsByKbIdIn(List.of(1L)))
-                .thenReturn(List.of(1L, 2L, 3L)); // 仅 3 篇，< 100
+                .thenReturn(List.of("1", "2", "3")); // 仅 3 篇，< 100
         List<PgVectorRetrievalPort.RawHit> sem = List.of(
                 new PgVectorRetrievalPort.RawHit("dA", 1, "A", 0.9, RetrievalResult.RetrievalSource.SEMANTIC));
         stubDualPath(sem, List.of());

@@ -1,5 +1,5 @@
 # Hify 后端 Deployment + Service
-# 依据：CLAUDE.md §5.1(无状态 2 副本目标，T4 先 1 副本；T5 提 2 副本) / §5.2(探针分开、优雅停机、资源)
+# 依据：AGENTS.md §5.1(无状态 2 副本目标，T4 先 1 副本；T5 提 2 副本) / §5.2(探针分开、优雅停机、资源)
 # 注意：镜像 hify-backend:latest 由 deploy/Dockerfile 构建后推到镜像仓库；
 #       本清单引用镜像名，dry-run 不校验镜像是否存在。
 apiVersion: apps/v1

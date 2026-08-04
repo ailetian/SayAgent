@@ -29,7 +29,7 @@ cd ~/my-rag-project
 
 ### Step 2：注册（只做一次）
 
-按照 `SETUP.md` 的说明，在 `.claude/settings.local.json` 中注册两个技能，在 `CLAUDE.md` 中引用规则。
+按照 `SETUP.md` 的说明，在 `.claude/settings.local.json` 中注册两个技能，在 `AGENTS.md` 中引用规则。
 
 ### Step 3：触发搭建引导
 
@@ -166,7 +166,7 @@ AI 自动：
 | 要一段现成的 BM25+RRF 代码 | `snippets/rag_snippets.py` — 片段1+2 |
 | 要完整的项目脚手架 | `templates/enterprise_rag/` |
 | 想知道怎么把知识库装到新项目 | `SETUP.md` |
-| AI 写 RAG 代码想让它自动规避已知坑 | `rules/rag_hot_rules.md`（CLAUDE.md已引用） |
+| AI 写 RAG 代码想让它自动规避已知坑 | `rules/rag_hot_rules.md`（AGENTS.md已引用） |
 
 ---
 

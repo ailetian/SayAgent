@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * <p>大白话：存一条带 knowledgeRefs/toolRefs 的 Agent，读出来引用列表应与存入的一致，
  * 验证 RefsJsonConverter（List&lt;Long&gt; ↔ '[1,2,3]'）在真实 MySQL 上往返无误。
  * agent 表挂了外键 model_provider_id → model_provider(id)，故每个用例先插一条 provider 撑住外键。
- * 命名遵循 {@code test方法_场景_预期}（CLAUDE.md §7.10 规则34）。
+ * 命名遵循 {@code test方法_场景_预期}（AGENTS.md §7.10 规则34）。
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)

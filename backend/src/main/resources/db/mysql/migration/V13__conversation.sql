@@ -1,5 +1,5 @@
 -- M6 T1：对话/消息业务表（仅 MySQL；document_chunk 走 pg 向量库，不在此文件）
--- 模板严格遵循 CLAUDE.md §6.1 通用字段（id/created_at/updated_at/deleted）
+-- 模板严格遵循 AGENTS.md §6.1 通用字段（id/created_at/updated_at/deleted）
 --           与 §6.2 索引纪律（外键列必建索引；含 deleted 查询把 deleted 纳入联合索引 规则3b；
 --           所有表强制 idx_created_at；单表索引含主键 ≤ 5 个 规则4）。
 -- 说明：conversation_id 这类「对外暴露的业务主键」采用 (business_id, deleted) 联合唯一键，

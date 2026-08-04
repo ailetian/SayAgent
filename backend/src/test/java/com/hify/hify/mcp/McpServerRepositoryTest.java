@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 必须放在具体 {@code @Entity}（McpServer）上才真生效（代码审核坑位5）。本测试即「实跑验证」：
  * 断言 findAll 过滤掉 deleted=1 的行、delete 把行转成 UPDATE(deleted=1) 而非真删。
  *
- * <p>命名遵循 {@code test方法_场景_预期}（CLAUDE.md §7.10 规则34）。
+ * <p>命名遵循 {@code test方法_场景_预期}（AGENTS.md §7.10 规则34）。
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)

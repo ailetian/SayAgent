@@ -17,7 +17,7 @@ Hify 是一个**单租户、自托管**的轻量 AI 平台，定位与 Dify / Fa
 - **LLM 调用全链路治理**：超时 / 重试（指数退避）/ 熔断 / 舱壁隔离 / 限流 / 自动降级（OpenAI → Claude → Gemini → Ollama），基于 Resilience4j，慢且不稳定的 LLM 调用不会拖垮请求线程。
 - **SSE 流式对话**：原生 `SseEmitter` + 专用虚拟线程推送池，客户端断开即取消后台 LLM 调用，避免空烧 token。
 - **RAG 知识库（基础版已落地，增强版规划中）**：上传 → 切片 → embedding → pgvector 检索 → 拼上下文问答；增强模块规划了混合检索（向量 + PG 全文）+ RRF 融合 + 阈值拒答 + 来源溯源。
-- **严谨的工程纪律**：所有编码 / 数据库 / LLM / 部署规则收口在唯一的 [`CLAUDE.md`](CLAUDE.md)；每条 DDL 走 Flyway 迁移；软删除 + keyset 分页 + 索引纪律内置；敏感字段用 VO 隔离。
+- **严谨的工程纪律**：所有编码 / 数据库 / LLM / 部署规则收口在唯一的 [`AGENTS.md`](AGENTS.md)；每条 DDL 走 Flyway 迁移；软删除 + keyset 分页 + 索引纪律内置；敏感字段用 VO 隔离。
 - **MCP 集成**：管理员配 MCP Server 地址，Agent 自动发现工具并调用内部系统，调用失败优雅降级。
 
 ## 技术栈
@@ -105,7 +105,7 @@ hify/
 ├── doc/              # 对外设计文档（需求 / 选型 / 部署 / 架构 / 数据库规范）
 ├── docker-compose.yml# 本地起 mysql/redis/pgvector
 ├── rule/             # 开发坑位库（踩坑与解法）
-├── CLAUDE.md         # 项目规则唯一入口（编码/数据库/LLM/部署规范）
+├── AGENTS.md         # 项目规则唯一入口（编码/数据库/LLM/部署规范）
 └── README.md
 ```
 

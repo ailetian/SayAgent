@@ -1,5 +1,5 @@
 # Hify K8s 非敏感配置（§7.11：只放非秘钥配置；密码/秘钥在 secret.yaml）
-# 依据：CLAUDE.md §5.1(组件清单) / §5.2(配置点) / §9(环境变量)
+# 依据：AGENTS.md §5.1(组件清单) / §5.2(配置点) / §9(环境变量)
 apiVersion: v1
 kind: ConfigMap
 metadata:

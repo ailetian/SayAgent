@@ -1,5 +1,5 @@
 # Hify 后端镜像
-# 依据：CLAUDE.md §1(Java 21)、§3.1(deploy/ 仓库结构)、T4_部署Dockerfile与docker_compose与K8s清单.md
+# 依据：AGENTS.md §1(Java 21)、§3.1(deploy/ 仓库结构)、T4_部署Dockerfile与docker_compose与K8s清单.md
 #
 # 用法（在仓库根目录执行）：
 #   1) 先产出 jar：  mvn -f backend/pom.xml package -DskipTests

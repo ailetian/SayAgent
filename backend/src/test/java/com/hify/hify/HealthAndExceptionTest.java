@@ -42,7 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>DataSource/Redis 连接池是"懒连接"，上下文可无库加载。</li>
  * </ul>
  * 
- * <p>测试方法命名遵循 {@code test方法_场景_预期}（CLAUDE.md §7.10 规则34）。
+ * <p>测试方法命名遵循 {@code test方法_场景_预期}（AGENTS.md §7.10 规则34）。
  */
 @SpringBootTest
 @AutoConfigureMockMvc(addFilters = false)

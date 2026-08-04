@@ -1,5 +1,5 @@
 -- M5 T1：知识库与文档业务表（仅 MySQL；document_chunk 走 pg 向量库，不在此文件）
--- 模板严格遵循 CLAUDE.md §6.1 / §6.2（id BIGINT UNSIGNED、created_at/updated_at、deleted、KEY idx_created_at、外键列必建索引）
+-- 模板严格遵循 AGENTS.md §6.1 / §6.2（id BIGINT UNSIGNED、created_at/updated_at、deleted、KEY idx_created_at、外键列必建索引）
 
 CREATE TABLE `knowledge_base` (
   `id`                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',

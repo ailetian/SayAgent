@@ -1,5 +1,5 @@
 -- M6 T1：对话日志表（仅 MySQL）。
--- 模板严格遵循 CLAUDE.md §6.1 通用字段（id/created_at/updated_at/deleted）
+-- 模板严格遵循 AGENTS.md §6.1 通用字段（id/created_at/updated_at/deleted）
 --           与 §6.2 索引纪律（外键列建索引；含 deleted 查询把 deleted 纳入联合索引 规则3b；
 --           所有表强制 idx_created_at；单表索引含主键 ≤ 5 个，写多读少 ≤ 3 个 规则4）。
 -- 说明：

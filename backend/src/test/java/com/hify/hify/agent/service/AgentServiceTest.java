@@ -49,7 +49,7 @@ import static org.mockito.Mockito.when;
  *
  * <p>聚焦：CRUD 链路、ADMIN 服务层校验、跨模块校验模型厂商存在（只调 ModelService 接口，
  * 不碰 modelprovider 内部实体/仓储）、默认 Agent 互斥、秘钥脱敏。
- * 命名遵循 {@code test方法_场景_预期}（CLAUDE.md §7.10 规则34）。
+ * 命名遵循 {@code test方法_场景_预期}（AGENTS.md §7.10 规则34）。
  */
 @ExtendWith(MockitoExtension.class)
 class AgentServiceTest {

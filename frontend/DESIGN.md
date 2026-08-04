@@ -1,7 +1,7 @@
 # Hify 前端设计语言（Design Tokens）
 
 > 本文件是 **全站统一视觉基准**，由 `src/views/Login.vue`（经 huashu-design 技能选定「Field.io 式流体沉浸」方向）确立。
-> 规则来源：`../CLAUDE.md` §3.6。后续每个新页面（`src/views/*`）开发前**必须先调用 huashu-design 设计技能**，实现时严格套用下方令牌。
+> 规则来源：`../AGENTS.md` §3.6。后续每个新页面（`src/views/*`）开发前**必须先调用 huashu-design 设计技能**，实现时严格套用下方令牌。
 
 ## 设计令牌
 

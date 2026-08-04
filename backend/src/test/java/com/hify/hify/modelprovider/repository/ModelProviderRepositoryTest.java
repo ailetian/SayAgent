@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Flyway 自动建好 model_provider 表），只验证三条派生查询。测试在事务内执行，结束自动回滚，
  * 不会污染业务数据。
  *
- * <p>命名遵循 {@code test方法_场景_预期}（CLAUDE.md §7.10 规则34）。
+ * <p>命名遵循 {@code test方法_场景_预期}（AGENTS.md §7.10 规则34）。
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)

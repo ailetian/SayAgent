@@ -12,7 +12,7 @@ import lombok.Setter;
  * <p>大白话：这是一整排"旋钮"的出厂默认档位——切多大一块、找回几条、多低分就不答。
  * 改这里等于全局改；单个知识库想搞特殊，就在 {@code knowledge_base.rag_config} 里只写要改的那几项覆盖（见 {@link RagConfig}）。
  *
- * <p>为什么所有默认值都写成 {@code public static final} 常量：CLAUDE.md §7.2 规则 7「魔法值零容忍」——
+ * <p>为什么所有默认值都写成 {@code public static final} 常量：AGENTS.md §7.2 规则 7「魔法值零容忍」——
  * 全项目引用同一个常量，避免 800/0.6 这类数字散落在切片器、检索器、实体默认值里各写一份、改一处漏一处。
  *
  * <p>三层参数纪律（需求 §7）：

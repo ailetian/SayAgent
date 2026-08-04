@@ -1,6 +1,6 @@
 -- M5 整改扩展（RBAC）：知识库访问授权表
 -- 一条记录 = 某知识库(kb_id) 对 某角色/某人(target) 开放访问权
--- 模板严格遵循 CLAUDE.md §6.1（id BIGINT UNSIGNED、四字段、KEY idx_created_at）/§6.2（索引纪律）
+-- 模板严格遵循 AGENTS.md §6.1（id BIGINT UNSIGNED、四字段、KEY idx_created_at）/§6.2（索引纪律）
 CREATE TABLE `kb_access` (
   `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `kb_id`       BIGINT UNSIGNED NOT NULL COMMENT '知识库 id（knowledge_base.id）',

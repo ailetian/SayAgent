@@ -1,5 +1,5 @@
 # Hify pgvector（PostgreSQL 向量库）StatefulSet + Service + PVC
-# 依据：CLAUDE.md §5.1(pgvector 组件) / §5.2(持久化)；镜像与 M1/T2 一致(pgvector/pgvector:pg16)
+# 依据：AGENTS.md §5.1(pgvector 组件) / §5.2(持久化)；镜像与 M1/T2 一致(pgvector/pgvector:pg16)
 # 首次启动挂载 configmap 里的 01_enable_vector.sql 自动启用 vector 扩展（复用 M1/T2 initdb 逻辑）
 apiVersion: apps/v1
 kind: StatefulSet

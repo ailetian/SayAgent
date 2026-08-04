@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>大白话：用 @DataJpaTest 把 JPA 这一层单独拎出来跑，连真实 MySQL（Flyway 自动建好 agent 表），
  * 只验证四条派生查询 + 软删除。测试在事务内执行，结束自动回滚，不污染业务数据。
  * agent 表上挂了外键 model_provider_id → model_provider(id)，故每个用例先插一条 model_provider 撑住外键。
- * 命名遵循 {@code test方法_场景_预期}（CLAUDE.md §7.10 规则34）。
+ * 命名遵循 {@code test方法_场景_预期}（AGENTS.md §7.10 规则34）。
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)

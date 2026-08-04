@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * <p>大白话：把带秘钥的实体转成 VO 再序列化，JSON 里永远不能出现 apiKey / secret 字段或秘钥明文，
  * 否则前端就能拿到厂商秘钥。本测试把它锁死。
  *
- * <p>命名遵循 test方法_场景_预期（CLAUDE.md §7.10 规则34）。
+ * <p>命名遵循 test方法_场景_预期（AGENTS.md §7.10 规则34）。
  */
 class ModelProviderVOTest {
 

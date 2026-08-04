@@ -1,6 +1,6 @@
 # RAG 高频规则（始终加载）
 
-> 复制 rag-knowledge/ 到新项目后，在 CLAUDE.md 中加：`@see rag-knowledge/rules/rag_hot_rules.md`
+> 复制 rag-knowledge/ 到新项目后，在 AGENTS.md 中加：`@see rag-knowledge/rules/rag_hot_rules.md`
 
 ---
 

@@ -53,7 +53,7 @@ import static org.mockito.Mockito.when;
  *   <li>全部失败 / 无启用模型 → 抛 LLM_ALL_PROVIDERS_FAILED。</li>
  * </ul>
  *
- * <p>命名遵循 test方法_场景_预期（CLAUDE.md §7.10 规则34）。
+ * <p>命名遵循 test方法_场景_预期（AGENTS.md §7.10 规则34）。
  */
 @ExtendWith(MockitoExtension.class)
 class ProviderRouterTest {

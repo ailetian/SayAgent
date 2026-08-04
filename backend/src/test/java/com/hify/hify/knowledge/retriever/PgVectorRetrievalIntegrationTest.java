@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 本测试往真实表里插 1024 维向量，调用 PgVectorRetrievalPort.retrieve 跑真实的 {@code 1 - (embedding <=> ?::vector)}
  * 余弦查询，验证四件事：余弦降序、kb_id 隔离、阈值真正过滤、topK 限制。
  *
- * <p>与 CLAUDE.md §7.10 规则35 一致：方法名 test方法_场景_预期。
+ * <p>与 AGENTS.md §7.10 规则35 一致：方法名 test方法_场景_预期。
  */
 @SpringBootTest
 class PgVectorRetrievalIntegrationTest {

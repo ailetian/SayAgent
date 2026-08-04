@@ -31,7 +31,7 @@ cp -r rag-knowledge/ ~/my-new-rag-project/
 
 ## 步骤3：引入规则
 
-在项目的 `CLAUDE.md` 中添加：
+在项目的 `AGENTS.md` 中添加：
 
 ```markdown
 @see rag-knowledge/rules/rag_hot_rules.md
