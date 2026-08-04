@@ -1,0 +1,103 @@
+# Hify 后端 Deployment + Service
+# 依据：CLAUDE.md §5.1(无状态 2 副本目标，T4 先 1 副本；T5 提 2 副本) / §5.2(探针分开、优雅停机、资源)
+# 注意：镜像 hify-backend:latest 由 deploy/Dockerfile 构建后推到镜像仓库；
+#       本清单引用镜像名，dry-run 不校验镜像是否存在。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hify-backend
+  labels:
+    app: hify-backend
+    app.kubernetes.io/part-of: hify
+spec:
+  replicas: 2            # §5.2 高可用 + 滚动发布零中断（T5）
+  selector:
+    matchLabels:
+      app: hify-backend
+  template:
+    metadata:
+      labels:
+        app: hify-backend
+    spec:
+      # §5.2 优雅停机：K8s 给 Pod 留足退出时间（preStop sleep 10 + Spring 优雅停机 30s，合计 < 60）
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: backend
+          image: hify-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9095
+          # 非敏感配置整体注入（键名即 Spring 环境变量名）
+          envFrom:
+            - configMapRef:
+                name: hify-config
+          # 敏感配置逐条从 Secret 取（§7.11）
+          # 注：密码只用 MYSQL_PASSWORD / POSTGRES_PASSWORD 注入，由 application.yml 的
+          #     ${MYSQL_PASSWORD} / ${POSTGRES_PASSWORD} 占位符消费（避免与 SPRING_DATASOURCE_PASSWORD
+          #     重复绑定同一属性 spring.datasource.password）。
+          env:
+            - name: HIFY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hify-secrets
+                  key: hify-jwt-secret
+            - name: HIFY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hify-secrets
+                  key: hify-admin-password
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hify-secrets
+                  key: mysql-password
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hify-secrets
+                  key: postgres-password
+          # §5.2 探针必须区分：就绪(依赖就绪才接流量) / 存活(进程存活即重启)
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 3
+          # §5.2 资源：1C2G 起步，防 LLM 积压吃光内存
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          # §5.2 优雅停机：给在飞 LLM/SSE 调用留时间完成
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hify-backend
+  labels:
+    app: hify-backend
+    app.kubernetes.io/part-of: hify
+spec:
+  type: ClusterIP
+  selector:
+    app: hify-backend
+  ports:
+    - name: http
+      port: 9095
+      targetPort: http

@@ -1,0 +1,1 @@
+import{r as e}from"./request-s8QVRCqT.js";function s(){return e.get("/agents")}function u(t){return e.post("/agents",t)}function a(t,n){return e.put(`/agents/${t}`,n)}function g(t){return e.delete(`/agents/${t}`)}export{u as c,g as d,s as l,a as u};

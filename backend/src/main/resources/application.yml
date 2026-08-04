@@ -1,0 +1,154 @@
+server:
+  port: 9095
+  # §5.2 优雅停机：滚动发布/缩容时先让在飞 LLM/SSE 调用完成再退（配合 K8s terminationGracePeriodSeconds）
+  shutdown: graceful
+
+spring:
+  # §5.2 优雅停机各阶段最大等待（默认 30s），给在飞 LLM/SSE 请求留足时间完成再退
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  # ===== 业务主库 MySQL（Flyway 默认管这个，JPA 也用这个 @Primary 数据源）=====
+  datasource:
+    url: jdbc:mysql://localhost:3306/hify?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
+    username: hify
+    password: ${MYSQL_PASSWORD:hify}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none                # 绝不让 JPA 自动建表，改表只走 Flyway（§9）
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/mysql/migration
+    baseline-on-migrate: true
+    fail-on-missing-locations: false   # T6 才有迁移脚本，先放宽为空也不报错
+
+  # ===== 第二数据源 PostgreSQL 向量库（M5 知识库写向量用）=====
+  # 注意：Hikari 要求用 jdbc-url（不是 url），否则连接串不会生效。
+  datasource.pg:
+    jdbc-url: jdbc:postgresql://localhost:5432/hify_vector
+    username: hify
+    password: ${POSTGRES_PASSWORD:hify}
+    driver-class-name: org.postgresql.Driver
+
+  # ===== Redis（缓存 / M2 起存 token）=====
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+# ===== 跨域（§5.1，放开本地前端来源）=====
+# 多来源用逗号分隔；生产可收紧为前端正式域名。
+# 注意：hify.* 是业务自定义配置，必须放在 spring: 之外（顶层），否则会被解析成 spring.hify.*
+hify:
+  cors:
+    allowed-origins: http://localhost:6177
+  # ===== JWT 密钥配置（§9：密钥走配置，生产用环境变量 HIFY_JWT_SECRET 注入；此处为开发默认值）=====
+  jwt:
+    secret: ${HIFY_JWT_SECRET:dev-only-secret-key-please-change-in-prod-32bytes!!}
+    expiration-ms: 7200000          # token 有效期 2h
+  # ===== 默认管理员种子密码（AdminSeedRunner 启动时播种 admin 账号用；生产用环境变量 HIFY_ADMIN_PASSWORD 覆盖）=====
+  admin:
+    password: ${HIFY_ADMIN_PASSWORD:admin123}
+  # ===== OkHttp 单例超时（§4.8，T3 使用；可在此覆盖默认值）=====
+  okhttp:
+    connect-timeout-seconds: 10
+    read-timeout-seconds: 60
+    write-timeout-seconds: 30
+  # ===== Embedding 配置（M5 T2：向量化维度/阈值/切块/批大小）=====
+  # 注意（K2）：RAG 引擎参数的唯一真相源是下方顶层 rag: 段；本段是 M5 T2 EmbeddingService 的遗留入参，
+  # dimension/similarity-threshold 与 rag.vector-dim/rag.score-threshold 保持同值，
+  # max-chunk-size 是 T2 的"纯长度粗切"参数，K3 语义切片器落地后由 rag.chunk-size 接管。
+  embedding:
+    dimension: 1024                  # 与 pgvector vector(1024) 一致（= rag.vector-dim）
+    similarity-threshold: 0.6        # 检索时过滤低于此相似度的 chunk（= rag.score-threshold）
+    max-chunk-size: 1000             # 单切片最大字符（M5 T2 粗切遗留，K3 后由 rag.chunk-size 接管）
+    batch-size: 20                   # 一次 embed 调用最多条数
+
+# ===== RAG 引擎全局默认参数（K2；绑定 RagProperties，前缀 rag）=====
+# 这是所有 RAG 旋钮的"出厂档位"。单个知识库要搞特殊，不改这里——
+# 在 knowledge_base.rag_config 这个 JSON 列里只写要覆盖的项，由 RagConfig.merge 合并（库级有值用库级，否则回退这里）。
+# 三层参数纪律（需求 §7）：
+#   建库参数 embedding-model / vector-dim / chunk-size / chunk-overlap —— 改了必须全库重建向量（UI 要提示）
+#   检索参数 retrieval-top-k / final-top-n / rrf-k / score-threshold / context-expand —— 即时生效
+#   生成参数（temperature 等）不在这里，走 M3 ProviderClient 的模型配置
+rag:
+  embedding-model: bge-m3            # 建库参数：换模型 = 全库重建
+  vector-dim: 1024                   # 建库参数：与 pgvector vector(1024) 强绑定，第一天定死禁改
+  chunk-size: 800                    # 建库参数：切块大小（字符），"一块能独立回答一个问题"
+  chunk-overlap: 120                 # 建库参数：约 15% 重叠，防关键句被切断在两块之间
+  retrieval-top-k: 10                # 检索参数：向量路/FTS 路各召回条数
+  final-top-n: 4                     # 检索参数：融合排序后最终喂给大模型的片段数
+  rrf-k: 60                          # 检索参数：RRF 融合常数（两路分数不可比，按排名投票）
+  score-threshold: 0.6               # 检索参数：低于此分一律拒答（与 hify.embedding.similarity-threshold 同值）
+  context-expand: 1                  # 检索参数：Small-to-Big，命中块前后各补几块原文
+  fts:
+    enabled: true                    # FTS 路人工总开关；置 false 才退化成纯向量单路
+    ts-config: zhparser_cfg          # 分词配置名；ZhparserProbe 启动探测后自动改写（装不上则降级 simple）
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true               # 为 §5.2 K8s 探针铺垫
+      show-details: always          # 开发期便于一眼看清 db/pg/redis 连通状态（生产可收紧）
+  # §5.2：K8s liveness/readiness 探针端点（/actuator/health/liveness、/actuator/health/readiness）
+  # 必须由这两个开关真正开启，否则 kubectl 引用的探针路径 404，Pod 永远 not-ready / 反复重启。
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+# ===== M3/T3 Resilience4j 熔断/重试/限流 =====
+# 按 provider_type 维度各一份实例，阈值统一走 default，可按厂商覆盖（§3.3：阈值不写死在 Java）。
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5000ms
+        permitted-number-of-calls-in-half-open-state: 5
+        automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      OPENAI: { base-config: default }
+      CLAUDE: { base-config: default }
+      GEMINI: { base-config: default }
+      OLLAMA: { base-config: default }
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 500ms
+    instances:
+      OPENAI: { base-config: default }
+      CLAUDE: { base-config: default }
+      GEMINI: { base-config: default }
+      OLLAMA: { base-config: default }
+  timelimiter:
+    configs:
+      default:
+        timeout-duration: 60s
+    instances:
+      OPENAI: { base-config: default }
+      CLAUDE: { base-config: default }
+      GEMINI: { base-config: default }
+      OLLAMA: { base-config: default }
+  bulkhead:
+    configs:
+      default:
+        max-concurrent-calls: 20
+        max-wait-duration: 0
+    instances:
+      OPENAI: { base-config: default }
+      CLAUDE: { base-config: default }
+      GEMINI: { base-config: default }
+      OLLAMA: { base-config: default }

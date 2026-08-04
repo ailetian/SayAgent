@@ -1,0 +1,36 @@
+# Hify Ingress（Nginx Ingress Controller）
+# 依据：CLAUDE.md §5.1(Ingress 路由 /api/*→后端、/→前端) / §5.2(SSE 超时/缓冲放长)
+# 路由：/api/* → hify-backend:9095 ；/ → frontend:80
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hify-ingress
+  labels:
+    app.kubernetes.io/part-of: hify
+  annotations:
+    # §5.2 SSE 友好：关闭缓冲 + 放长读写超时（连续生成长文本 120s 不够，统一 300s）
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # 可选：单 IP 限速防滥用（§5.2 提到 limit-rps 20）
+    # nginx.ingress.kubernetes.io/limit-rps: "20"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: hify.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: hify-backend
+                port:
+                  number: 9095
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

@@ -1,0 +1,86 @@
+# ============================================================
+# Hify 项目 .gitignore  ——  上传 GitHub 前必带
+# 目标：只提交源码与配置，排除构建产物 / 运行日志 / 个人上下文 / 凭据
+# ============================================================
+
+# ---------- 操作系统 & IDE ----------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+
+# ---------- Java / Maven (backend) ----------
+backend/target/
+backend/**/target/
+*.class
+*.jar
+!**/src/**/*.jar          # 不误伤源码目录里可能存在的资源 jar
+# 本机 Maven 损坏时的本地重编译脚本（硬编码了个人路径，不入库）
+backend/_rebuild.sh
+# 遗留空文件，不入库
+backend/mvn
+# 解压 jar 的临时构建目录
+backend/_tmp/
+
+# ---------- Node / Vue (frontend) ----------
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.log
+frontend/_dev_*.log
+frontend/_dev_*.out
+# 见下方“凭据”段：真实 .env 不入库，只留 .env.example
+
+# ---------- Python (rag-knowledge / _temp) ----------
+_temp/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.venv/pyvenv.cfg
+
+# ---------- 日志 & 测试结果 & 临时产物 ----------
+*.log
+acceptance/
+test-artifacts/
+html/
+# 本地联调用凭据（明文 admin/admin123），仅本地用，不入库
+login.json
+body_login.json
+
+# ---------- 个人 AI 工作区（含记忆 / 自动化 / 会话上下文） ----------
+.workbuddy/
+# .codebuddy 含项目级共享 skill，默认保留；如含机器相关配置可酌情忽略
+# .codebuddy/
+
+# ---------- 内部开发文档（不对外发布：验收报告 / 进度表 / 子模块拆分草稿） ----------
+plans/
+
+# ---------- 凭据 / 密钥 ----------
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+*.p12
+*.jks
+secrets/
+.env.local
+.env.*.local
+
+# ---------- 编辑器 / 终端临时 ----------
+*.tmp
+*.bak
+*~
+
+# ---------- 说明 ----------
+# 仍需注意：
+# 1) backend/src/main/resources/application.yml 里有默认弱口令(admin123)与 dev JWT 密钥，
+#    仅适合本地开发；任何对外部署请用环境变量 HIFY_ADMIN_PASSWORD / HIFY_JWT_SECRET 覆盖。
+# 2) doc/ 已确认无绝对路径、作为对外设计文档保留；plans/ 为内部开发草稿(验收报告/进度表)已整体忽略，无需逐文件清理。

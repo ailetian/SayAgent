@@ -1,0 +1,82 @@
+# Hify 前端静态 Deployment + Service（K8s 内前端）
+# 依据：T4 验收点 5「k8s 含前端」+ 00_概述「K8s 用同一思路或独立前端 Deployment」
+# 说明：T4 交付物清单的 k8s 文件未列 frontend.yaml，但验收点 5 要求 k8s 栈包含前端，
+#       且模块概述明确允许「独立前端 Deployment」，故透明补此文件使全栈 k8s 完整可验。
+#
+# 镜像 hify-frontend:latest 由前端构建产出（构建方式示意，不在 T4 清单内，可于 T5 固化）：
+#   cd frontend && npm install && npm run build
+#   docker build -t hify-frontend:latest -f - . <<'DF'
+#   FROM nginx:alpine
+#   COPY dist /usr/share/nginx/html
+#   DF
+# 本清单挂载 configmap 里的 nginx 配置（已含 §5.2 SSE 友好设置）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels:
+    app: frontend
+    app.kubernetes.io/part-of: hify
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: hify-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          # 挂载 nginx 配置（来自 hify-config / FRONTEND_NGINX_CONF）
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: hify-config
+            items:
+              - key: FRONTEND_NGINX_CONF
+                path: default.conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  labels:
+    app: frontend
+    app.kubernetes.io/part-of: hify
+spec:
+  type: ClusterIP
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

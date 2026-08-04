@@ -1,0 +1,92 @@
+# Hify pgvector（PostgreSQL 向量库）StatefulSet + Service + PVC
+# 依据：CLAUDE.md §5.1(pgvector 组件) / §5.2(持久化)；镜像与 M1/T2 一致(pgvector/pgvector:pg16)
+# 首次启动挂载 configmap 里的 01_enable_vector.sql 自动启用 vector 扩展（复用 M1/T2 initdb 逻辑）
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pgvector
+  labels:
+    app: pgvector
+    app.kubernetes.io/part-of: hify
+spec:
+  serviceName: pgvector
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgvector
+  template:
+    metadata:
+      labels:
+        app: pgvector
+    spec:
+      containers:
+        - name: pgvector
+          image: pgvector/pgvector:pg16
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "hify_vector"
+            - name: POSTGRES_USER
+              value: "hify"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hify-secrets
+                  key: postgres-password
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U hify"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 5
+          livenessProbe:
+            tcpSocket:
+              port: postgres
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          volumeMounts:
+            - name: pg-data
+              mountPath: /var/lib/postgresql/data
+            # 首次启动自动启用 vector 扩展（仅空库时执行一次）
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: initdb
+          configMap:
+            name: hify-config
+            items:
+              - key: PGVECTOR_INITDB_SQL
+                path: 01_enable_vector.sql
+  volumeClaimTemplates:
+    - metadata:
+        name: pg-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgvector
+  labels:
+    app: pgvector
+    app.kubernetes.io/part-of: hify
+spec:
+  type: ClusterIP
+  selector:
+    app: pgvector
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

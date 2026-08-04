@@ -1,0 +1,180 @@
+package com.hify.hify.modelprovider.route;
+
+import com.hify.hify.common.exception.BizException;
+import com.hify.hify.common.exception.ErrorCode;
+import com.hify.hify.modelprovider.client.ChatMessage;
+import com.hify.hify.modelprovider.client.LlmResponse;
+import com.hify.hify.modelprovider.client.ProviderClient;
+import com.hify.hify.modelprovider.client.ProviderConfig;
+import com.hify.hify.modelprovider.client.TokenUsage;
+import com.hify.hify.modelprovider.domain.enums.ProviderType;
+import com.hify.hify.modelprovider.entity.ModelProvider;
+import com.hify.hify.modelprovider.repository.ModelProviderRepository;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import reactor.core.publisher.Flux;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
+/**
+ * 模型路由 + 降级链（§4.5 降级 / §7.4 异常 / §4.9 可观测）。
+ *
+ * <p>大白话：默认模型按 is_default + sort_order 选；主模型抛异常就自动切下一个 enabled 的 Provider，
+ * 直到成功或全失败。每次切换打 WARN（哪个 provider 失败、切到哪个），底层异常带上下文不吞（§7.4）。
+ */
+@Component
+public class ProviderRouter {
+
+    private static final Logger log = LoggerFactory.getLogger(ProviderRouter.class);
+
+    private final ModelProviderRepository repository;
+    private final ResilienceDecorator decorator;
+    private final Map<ProviderType, ProviderClient> clientMap;
+
+    public ProviderRouter(ModelProviderRepository repository,
+                          ResilienceDecorator decorator,
+                          List<ProviderClient> clients) {
+        this.repository = repository;
+        this.decorator = decorator;
+        this.clientMap = clients.stream()
+                .collect(Collectors.toMap(ProviderClient::getType, c -> c));
+    }
+
+    /** 选主模型并发请求，主失败自动降级到下一个 enabled Provider。 */
+    public LlmResponse route(List<ChatMessage> messages) {
+        List<ModelProvider> enabled = repository.findAllByEnabledTrueOrderBySortOrderAsc();
+        if (enabled.isEmpty()) {
+            throw new BizException(ErrorCode.LLM_ALL_PROVIDERS_FAILED, "no enabled model provider configured");
+        }
+        List<ModelProvider> ordered = orderWithDefaultFirst(enabled);
+        for (int i = 0; i < ordered.size(); i++) {
+            ModelProvider provider = ordered.get(i);
+            ProviderClient client = clientMap.get(provider.getProviderType());
+            if (client == null) {
+                log.warn("llm route skip: no client registered for providerType={}", provider.getProviderType());
+                continue;
+            }
+            ProviderConfig config = toConfig(provider);
+            ProviderClient decorated = decorator.decorate(client, provider.getProviderType());
+            long startNanos = System.nanoTime();
+            try {
+                LlmResponse resp = decorated.send(messages, config);
+                long costMs = (System.nanoTime() - startNanos) / 1_000_000;
+                // §4.9/§7.4 可观测：每次成功调用打 INFO，7 字段齐全（provider/model/costMs/inTok/outTok/fallback/ok）；
+                // 占位符写法，绝不拼 api_key/token（§7.11 规则37）；fallback 标记是否命中降级（i>0 即降级）。
+                log.info("llm.call provider={} model={} costMs={} inTok={} outTok={} fallback={} ok={}",
+                        provider.getProviderType(), provider.getModel(), costMs,
+                        resp.getPromptTokens(), resp.getCompletionTokens(), i > 0, true);
+                return resp;
+            } catch (Exception e) {
+                long costMs = (System.nanoTime() - startNanos) / 1_000_000;
+                // §4.9：失败调用同样打 INFO（ok=false）便于成本/质量分析，并额外 ERROR 保留堆栈（§7.4 规则17）
+                log.info("llm.call provider={} model={} costMs={} inTok={} outTok={} fallback={} ok={}",
+                        provider.getProviderType(), provider.getModel(), costMs, null, null, i > 0, false);
+                log.error("llm.call failed, fallback to next: provider={} sortOrder={}",
+                        provider.getProviderType(), provider.getSortOrder(), e);
+            }
+        }
+        throw new BizException(ErrorCode.LLM_ALL_PROVIDERS_FAILED, "all enabled model providers failed");
+    }
+
+    /**
+     * 流式对话（M6 T3）：按 preferredProviderId 选定厂商后直连其 client.stream，
+     * 不做熔断/超时包裹（未来式取消语义复杂，流式超时由连接/读超时控制）。
+     * 若 preferredProviderId 为空或对应厂商不可用，则回退到默认厂商（§4.5 选主逻辑）。
+     */
+    public Flux<String> stream(List<ChatMessage> messages, Long preferredProviderId, TokenUsage usage) {
+        ModelProvider provider = resolveProvider(preferredProviderId);
+        ProviderClient client = clientMap.get(provider.getProviderType());
+        if (client == null) {
+            throw new BizException(ErrorCode.MODEL_NOT_FOUND,
+                    "未注册流式客户端 providerType=" + provider.getProviderType());
+        }
+        ProviderConfig config = toConfig(provider);
+        return client.stream(messages, config, usage);
+    }
+
+    /** 解析流式目标厂商：优先用 preferredProviderId（须 enabled），否则用默认厂商（§4.5）。 */
+    private ModelProvider resolveProvider(Long preferredProviderId) {
+        if (preferredProviderId != null) {
+            return repository.findById(preferredProviderId)
+                    .filter(p -> Boolean.TRUE.equals(p.getEnabled()))
+                    .orElseGet(this::defaultProvider);
+        }
+        return defaultProvider();
+    }
+
+    /** 默认厂商：default_model=true 优先，否则取 sort_order 最前的启用厂商。 */
+    private ModelProvider defaultProvider() {
+        List<ModelProvider> enabled = repository.findAllByEnabledTrueOrderBySortOrderAsc();
+        if (enabled.isEmpty()) {
+            throw new BizException(ErrorCode.LLM_ALL_PROVIDERS_FAILED, "no enabled model provider configured");
+        }
+        return enabled.stream()
+                .filter(ModelProvider::getDefaultModel)
+                .findFirst()
+                .orElse(enabled.get(0));
+    }
+
+    /** 默认模型排第一，其余按 sortOrder 升序跟随（§4.5 降级顺序）。 */
+    private List<ModelProvider> orderWithDefaultFirst(List<ModelProvider> enabled) {
+        ModelProvider primary = enabled.stream()
+                .filter(ModelProvider::getDefaultModel)
+                .findFirst()
+                .orElse(enabled.get(0));
+        List<ModelProvider> ordered = new ArrayList<>();
+        ordered.add(primary);
+        for (ModelProvider p : enabled) {
+            if (!Objects.equals(p.getId(), primary.getId())) {
+                ordered.add(p);
+            }
+        }
+        return ordered;
+    }
+
+    /** 把 ModelProvider 抽成单次调用配置（秘钥只在此使用，绝不落库/打印，§7.11）。 */
+    private ProviderConfig toConfig(ModelProvider provider) {
+        return ProviderConfig.builder()
+                .apiUrl(provider.getApiUrl())
+                .apiKey(provider.getSecret())
+                .model(provider.getModel())
+                .timeoutMs(30000)
+                .build();
+    }
+
+    /**
+     * 默认 embedding 客户端（已套容错）：优先 default_model=true 的启用模型，否则取 sort_order 最前的启用模型。
+     * 供 M5 知识库 EmbeddingService 调用，knowledge 模块不感知具体厂商（§3.3 解耦）。
+     */
+    public ProviderClient getEmbeddingClient() {
+        ProviderClient client = clientMap.get(resolveEmbeddingProvider().getProviderType());
+        if (client == null) {
+            throw new BizException(ErrorCode.MODEL_NOT_FOUND, "未注册 embedding 客户端");
+        }
+        return decorator.decorate(client, client.getType());
+    }
+
+    /** 默认 embedding 模型的连接配置（apiUrl/apiKey/model）。 */
+    public ProviderConfig getEmbeddingConfig() {
+        return toConfig(resolveEmbeddingProvider());
+    }
+
+    /** 选默认 embedding 模型：先按 default=true，再退化为第一个启用的模型。 */
+    private ModelProvider resolveEmbeddingProvider() {
+        List<ModelProvider> all = repository.findAll();
+        return all.stream()
+                .filter(p -> Boolean.TRUE.equals(p.getEnabled()) && Boolean.TRUE.equals(p.getDefaultModel()))
+                .min(Comparator.comparingInt(p -> p.getSortOrder() == null ? Integer.MAX_VALUE : p.getSortOrder()))
+                .orElseGet(() -> all.stream()
+                        .filter(p -> Boolean.TRUE.equals(p.getEnabled()))
+                        .min(Comparator.comparingInt(p -> p.getSortOrder() == null ? Integer.MAX_VALUE : p.getSortOrder()))
+                        .orElseThrow(() -> new BizException(ErrorCode.MODEL_NOT_FOUND, "未配置可用的 embedding 模型")));
+    }
+}
