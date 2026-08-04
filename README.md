@@ -1,6 +1,6 @@
-# Hify
+# SayAgent
 
-> 一句话定位：**给团队自己用的 AI 员工制造厂** —— 一人搭建平台，团队内 20–50 人都能拥有"懂公司文档 + 能操作公司系统"的 AI 助手。
+> 一句话定位：**说一句，就生成一个自带 MCP 工具 + 内置知识库的 AI Agent** —— 单租户、自托管，给 20–50 人团队自己掌控数据与模型。
 >
 > 技术栈：后端 **Spring Boot 3.3（Java 21）** + 前端 **Vue 3**；AI 用 **LangChain4j**；数据层 **MySQL 8（业务）+ PostgreSQL + pgvector（向量）+ Redis（缓存/限流）**。
 
@@ -8,7 +8,7 @@
 
 ## 这个项目是什么
 
-Hify 是一个**单租户、自托管**的轻量 AI 平台，定位与 Dify / FastGPT 等大型开源平台不同：它不追求多租户与插件市场，而是聚焦"一个团队、自己部署、自己掌控数据与模型"。对 Java 技术栈的团队尤其友好——整套后端是标准 Spring Boot 单体（按功能分包的 Modulith），无需另学一套 Python/TS 生态。
+SayAgent 是一个**单租户、自托管**的轻量 AI 平台，定位与 Dify / FastGPT 等大型开源平台不同：它不追求多租户与插件市场，而是聚焦"一个团队、自己部署、自己掌控数据与模型"。对 Java 技术栈的团队尤其友好——整套后端是标准 Spring Boot 单体（按功能分包的 Modulith），无需另学一套 Python/TS 生态。
 
 核心链路：**登录 → 配模型 → 建 Agent → 挂知识库/工具 → 对话/API → 留日志 → 本地部署 → MCP 接内部系统**。
 
@@ -73,7 +73,7 @@ mvn -DskipTests package
 java -Dfile.encoding=UTF-8 -jar target\hify-backend-0.0.1-SNAPSHOT.jar
 ```
 
-看到 `Started HifyApplication` 即启动成功。健康检查：
+看到 `Started SayAgentApplication` 即启动成功。健康检查：
 
 ```powershell
 curl http://localhost:9095/actuator/health

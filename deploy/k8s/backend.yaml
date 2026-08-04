@@ -1,29 +1,29 @@
 # Hify 后端 Deployment + Service
 # 依据：AGENTS.md §5.1(无状态 2 副本目标，T4 先 1 副本；T5 提 2 副本) / §5.2(探针分开、优雅停机、资源)
-# 注意：镜像 hify-backend:latest 由 deploy/Dockerfile 构建后推到镜像仓库；
+# 注意：镜像 sayagent-backend:latest 由 deploy/Dockerfile 构建后推到镜像仓库；
 #       本清单引用镜像名，dry-run 不校验镜像是否存在。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: hify-backend
+  name: sayagent-backend
   labels:
-    app: hify-backend
+    app: sayagent-backend
     app.kubernetes.io/part-of: hify
 spec:
   replicas: 2            # §5.2 高可用 + 滚动发布零中断（T5）
   selector:
     matchLabels:
-      app: hify-backend
+      app: sayagent-backend
   template:
     metadata:
       labels:
-        app: hify-backend
+        app: sayagent-backend
     spec:
       # §5.2 优雅停机：K8s 给 Pod 留足退出时间（preStop sleep 10 + Spring 优雅停机 30s，合计 < 60）
       terminationGracePeriodSeconds: 60
       containers:
         - name: backend
-          image: hify-backend:latest
+          image: sayagent-backend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -89,14 +89,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: hify-backend
+  name: sayagent-backend
   labels:
-    app: hify-backend
+    app: sayagent-backend
     app.kubernetes.io/part-of: hify
 spec:
   type: ClusterIP
   selector:
-    app: hify-backend
+    app: sayagent-backend
   ports:
     - name: http
       port: 9095

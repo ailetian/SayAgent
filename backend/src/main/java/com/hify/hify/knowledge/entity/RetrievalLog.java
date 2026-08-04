@@ -33,8 +33,11 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 public class RetrievalLog extends BaseEntity {
 
-    /** 知识库 id。 */
-    @Column(name = "kb_id", nullable = false)
+    /**
+     * 知识库 id。允许为空：当 Agent 未挂载任何知识库（拒答原因 {@code NO_KB}）时，本列置空，
+     * 但仍需记一条拒答日志（§5.6「每次问答记账」）。日志不建外键，存活于知识库软删之后。
+     */
+    @Column(name = "kb_id", nullable = true)
     private Long kbId;
 
     /** Agent id。 */

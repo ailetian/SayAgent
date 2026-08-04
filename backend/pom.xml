@@ -14,9 +14,9 @@
     </parent>
 
     <groupId>com.hify</groupId>
-    <artifactId>hify-backend</artifactId>
+    <artifactId>sayagent-backend</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>hify-backend</name>
+    <name>sayagent-backend</name>
 
     <properties>
         <java.version>21</java.version>   <!-- 使用当前系统安装的 Java 21（§1 技术栈；Spring Boot 3.3.5 官方支持 21，虚拟线程已正式可用） -->

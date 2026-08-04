@@ -1,6 +1,6 @@
 # Hify Ingress（Nginx Ingress Controller）
 # 依据：AGENTS.md §5.1(Ingress 路由 /api/*→后端、/→前端) / §5.2(SSE 超时/缓冲放长)
-# 路由：/api/* → hify-backend:9095 ；/ → frontend:80
+# 路由：/api/* → sayagent-backend:9095 ；/ → frontend:80
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -24,7 +24,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: hify-backend
+                name: sayagent-backend
                 port:
                   number: 9095
           - path: /

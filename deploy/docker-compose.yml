@@ -28,7 +28,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: hify-backend:latest
+    image: sayagent-backend:latest
     # 端口仅在宿主机暴露用于本地验证；生产由 Ingress 进集群内部 Service
     ports:
       - "9095:9095"

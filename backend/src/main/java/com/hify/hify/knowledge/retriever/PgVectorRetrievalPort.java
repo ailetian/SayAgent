@@ -224,17 +224,20 @@ public class PgVectorRetrievalPort implements RetrievalPort {
         for (int i = 0; i < sem.size(); i++) {
             RawHit h = sem.get(i);
             double rrf = 1.0 / (rrfK + (i + 1));
-            merged.put(keyOf(h), new Fused(h, rrf, true, false));
+            // 语义路片段：语义余弦即其真实 score（已通过 K4 语义路余弦阈值过滤），作为 semanticScore
+            merged.put(keyOf(h), new Fused(h, rrf, true, false, h.score()));
         }
         for (int j = 0; j < fts.size(); j++) {
             RawHit h = fts.get(j);
             double rrf = 1.0 / (rrfK + (j + 1));
             Fused cur = merged.get(keyOf(h));
             if (cur == null) {
-                merged.put(keyOf(h), new Fused(h, rrf, false, true));
+                // 仅命中 FTS 路、未进语义 top-k：未通过余弦闸门，semanticScore 记 0.0（供 K5 阈值拒答）
+                merged.put(keyOf(h), new Fused(h, rrf, false, true, 0.0));
             } else {
                 cur.rrf += rrf;       // 同一 chunk 两路都命中 → 名次分累加
                 cur.fromFts = true;   // 标记为"两路皆有"，来源仍优先标 SEMANTIC（语义为权威相似度）
+                // 保留 cur.semanticScore（来自语义路真实余弦），不被 FTS 覆盖
             }
         }
         List<Fused> sorted = new ArrayList<>(merged.values());
@@ -247,7 +250,7 @@ public class PgVectorRetrievalPort implements RetrievalPort {
                     ? RetrievalResult.RetrievalSource.SEMANTIC
                     : RetrievalResult.RetrievalSource.FTS;
             out.add(new RetrievalResult(f.hit.documentId(), f.hit.chunkIndex(),
-                    f.hit.content(), f.rrf, i + 1, src));
+                    f.hit.content(), f.rrf, i + 1, src, f.semanticScore));
         }
         return out;
     }
@@ -259,7 +262,7 @@ public class PgVectorRetrievalPort implements RetrievalPort {
         for (int i = 0; i < n; i++) {
             RawHit h = hits.get(i);
             out.add(new RetrievalResult(h.documentId(), h.chunkIndex(), h.content(),
-                    h.score(), i + 1, RetrievalResult.RetrievalSource.SEMANTIC));
+                    h.score(), i + 1, RetrievalResult.RetrievalSource.SEMANTIC, h.score()));
         }
         return out;
     }
@@ -299,18 +302,20 @@ public class PgVectorRetrievalPort implements RetrievalPort {
                          RetrievalResult.RetrievalSource source) {
     }
 
-    /** RRF 融合的中间态：原始命中 + 综合名次分 + 来源标记。 */
+    /** RRF 融合的中间态：原始命中 + 综合名次分 + 来源标记 + 语义余弦（供 K5 阈值拒答）。 */
     private static final class Fused {
         RawHit hit;
         double rrf;
         boolean fromSemantic;
         boolean fromFts;
+        double semanticScore;
 
-        Fused(RawHit hit, double rrf, boolean fromSemantic, boolean fromFts) {
+        Fused(RawHit hit, double rrf, boolean fromSemantic, boolean fromFts, double semanticScore) {
             this.hit = hit;
             this.rrf = rrf;
             this.fromSemantic = fromSemantic;
             this.fromFts = fromFts;
+            this.semanticScore = semanticScore;
         }
     }
 }

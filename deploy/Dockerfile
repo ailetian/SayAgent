@@ -3,8 +3,8 @@
 #
 # 用法（在仓库根目录执行）：
 #   1) 先产出 jar：  mvn -f backend/pom.xml package -DskipTests
-#   2) 构建镜像：  docker build -f deploy/Dockerfile -t hify-backend .
-#   3) 运行：      docker run -p 9095:9095 --env-file .env hify-backend
+#   2) 构建镜像：  docker build -f deploy/Dockerfile -t sayagent-backend .
+#   3) 运行：      docker run -p 9095:9095 --env-file .env sayagent-backend
 #
 # 说明：
 #   - 基础镜像 eclipse-temurin:21-jre（Spring Boot 3.3.5 官方支持 Java 21，虚拟线程已正式可用）。
@@ -18,7 +18,7 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 
 # 拷可执行 jar（相对路径基于 build context = 仓库根目录 `.`）
-COPY backend/target/hify-backend-0.0.1-SNAPSHOT.jar app.jar
+COPY backend/target/sayagent-backend-0.0.1-SNAPSHOT.jar app.jar
 
 # 允许通过 JAVA_OPTS 注入 JVM 参数（内存限制 / 时区等），不写死秘钥
 ENV JAVA_OPTS="-Duser.timezone=UTC"
