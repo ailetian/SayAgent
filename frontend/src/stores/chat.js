@@ -52,7 +52,16 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadHistory(id, lastId) {
     const page = await listMessages(id, lastId)
-    const items = (page.items || []).map((m) => ({ role: normalizeRole(m.role), content: m.content, id: m.id }))
+    const items = (page.items || []).map((m) => {
+      // 从持久化的 traceJson 还原「调用轨迹」（KB 检索 / MCP 工具调用），对话日志铁律：必须可事后回看
+      let steps = []
+      try {
+        if (m.traceJson) steps = JSON.parse(m.traceJson)
+      } catch (e) {
+        steps = []
+      }
+      return { role: normalizeRole(m.role), content: m.content, id: m.id, steps }
+    })
     if (!lastId) {
       // 整段加载（打开会话 / 流式结束后刷新）
       messages.value = items
