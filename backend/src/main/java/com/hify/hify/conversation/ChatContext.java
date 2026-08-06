@@ -2,6 +2,7 @@ package com.hify.hify.conversation;
 
 import com.hify.hify.modelprovider.client.ChatMessage;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -32,6 +33,8 @@ public class ChatContext {
 
     private String retrievedKnowledge = "";
     private List<ChatMessage> messages = List.of();
+    /** 调用轨迹（KB 检索 / MCP 工具调用明细），编排过程中累积，最终序列化进 message.trace_json。 */
+    private List<CallTrace> trace = new ArrayList<>();
 
     private ChatContext(Builder b) {
         this.userId = b.userId;
@@ -111,6 +114,11 @@ public class ChatContext {
 
     public List<ChatMessage> getMessages() {
         return messages;
+    }
+
+    /** 调用轨迹列表（编排过程累积，最终落库 message.trace_json）。 */
+    public List<CallTrace> getTrace() {
+        return trace;
     }
 
     /** 追加召回到的知识文本（可能为""表示无知识）。 */
@@ -208,5 +216,34 @@ public class ChatContext {
         public ChatContext build() {
             return new ChatContext(this);
         }
+    }
+
+    /**
+     * 调用轨迹明细（M6 T3）：一次对话里「知识库检索命中」或「MCP 工具调用」的一条记录。
+     *
+     * <p>大白话：把"这次对话 AI 背后调了啥"原样记下来——哪篇文档命中、相似度多少、调了哪个 MCP 工具、
+     * 入参出参是什么。序列化为 {@code message.trace_json}，前端对话详情页可展开回看。
+     * 对话日志铁律：KB/MCP 调用记录一律不得删除、必须持久化，即便模型最终没引用也要留痕。
+     */
+    public record CallTrace(
+            /** retrieval=知识库检索 / tool=MCP 工具调用。 */
+            String kind,
+            /** 标题文案（如「知识库命中：文档 doc#1 片段#2（相似度 0.812）」）。 */
+            String label,
+            /** done / running / error。 */
+            String status,
+            /** retrieval：命中片段所属文档业务 id。 */
+            String docId,
+            /** retrieval：余弦相似度 [-1,1]，越大越相关。 */
+            Double score,
+            /** tool：工具名。 */
+            String toolName,
+            /** tool：入参 JSON。 */
+            String args,
+            /** retrieval：命中片段摘要；tool：工具返回摘要。 */
+            String result,
+            /** tool：是否成功（false=降级/不可用）。 */
+            Boolean success
+    ) {
     }
 }

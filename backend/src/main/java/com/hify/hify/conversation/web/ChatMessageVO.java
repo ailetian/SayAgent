@@ -11,6 +11,8 @@ public record ChatMessageVO(
         String role,
         String content,
         Integer seq,
-        Instant createdAt
+        Instant createdAt,
+        /** 调用轨迹 JSON（KB 检索 / MCP 工具调用明细），供前端事后回看。 */
+        String traceJson
 ) {
 }

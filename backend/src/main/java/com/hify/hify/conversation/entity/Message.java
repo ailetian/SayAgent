@@ -71,6 +71,10 @@ public class Message extends BaseEntity {
     @Column(nullable = false, length = 10)
     private MessageStatus status;
 
+    /** 调用轨迹 JSON（KB 检索命中 / MCP 工具调用明细），供事后回看（对话日志铁律，不得裁剪）。 */
+    @Column(name = "trace_json", columnDefinition = "MEDIUMTEXT")
+    private String traceJson;
+
     /** 命中厂商（OPENAI/OLLAMA 等，§4.9 可观测；user 消息此列留空）。 */
     @Column(name = "provider", length = 32)
     private String provider;

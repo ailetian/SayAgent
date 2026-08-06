@@ -7,6 +7,7 @@ import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
 import com.hify.hify.conversation.ConversationLogAsyncWriter;
 import com.hify.hify.conversation.ChatContext;
+import com.hify.hify.conversation.ChatContext.CallTrace;
 import com.hify.hify.conversation.dto.ChatHistoryPage;
 import com.hify.hify.conversation.dto.ChatRequest;
 import com.hify.hify.conversation.dto.LogRecord;
@@ -16,6 +17,8 @@ import com.hify.hify.conversation.repository.ConversationRepository;
 import com.hify.hify.conversation.repository.MessageRepository;
 import com.hify.hify.conversation.web.ChatMessageVO;
 import com.hify.hify.conversation.web.ConversationVO;
+import com.hify.hify.knowledge.entity.Document;
+import com.hify.hify.knowledge.repository.DocumentRepository;
 import com.hify.hify.knowledge.retriever.RetrievalPort;
 import com.hify.hify.user.UserService;
 import com.hify.hify.modelprovider.client.ChatMessage;
@@ -86,6 +89,7 @@ public class ConversationService {
     private final ModelService modelService;
     private final LlmStreamService llmStreamService;
     private final RetrievalPort retrievalPort;
+    private final DocumentRepository documentRepository;
     private final ConversationLogAsyncWriter conversationLogAsyncWriter;
     private final McpService mcpService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -98,6 +102,7 @@ public class ConversationService {
                                ModelService modelService,
                                LlmStreamService llmStreamService,
                                RetrievalPort retrievalPort,
+                               DocumentRepository documentRepository,
                                ConversationLogAsyncWriter conversationLogAsyncWriter,
                                McpService mcpService) {
         this.conversationRepository = conversationRepository;
@@ -108,6 +113,7 @@ public class ConversationService {
         this.modelService = modelService;
         this.llmStreamService = llmStreamService;
         this.retrievalPort = retrievalPort;
+        this.documentRepository = documentRepository;
         this.conversationLogAsyncWriter = conversationLogAsyncWriter;
         this.mcpService = mcpService;
     }
@@ -246,11 +252,11 @@ public class ConversationService {
         String conversationId = conv.getConversationId();
         Instant start = Instant.now();
         try {
-            ChatContext ctx = prepare(req, userId, conv);
+            ChatContext ctx = prepare(req, userId, conv, emitter);
             sendMeta(emitter, ctx);
             // M7/T3：若 Agent 配置了 toolRefs，调 MCP 工具把结果拼回上下文继续生成（§2 模块8）
             // 用独立 final 变量承接，避免重赋值 ctx 导致 lambda 捕获「非 effectively final」编译错误（§4.2）
-            ChatContext enrichedCtx = enrichWithMcpTools(ctx);
+            ChatContext enrichedCtx = enrichWithMcpTools(ctx, emitter);
             TokenUsage usage = new TokenUsage();
             StringBuilder answer = new StringBuilder();
             Disposable d = llmStreamService.stream(enrichedCtx.getMessages(), enrichedCtx.getProviderRef(), usage)
@@ -261,10 +267,8 @@ public class ConversationService {
                             },
                             err -> {
                                 String partial = answer.toString();
-                                // 先发 error 终结帧并关闭流，确保前端必定解除流式锁定（不再等连接关闭）。
-                                sendError(emitter, err.getMessage());
-                                closeQuietly(emitter);
-                                // 落库/写日志为服务端尽力而为，失败仅告警，绝不阻断前端交互。
+                                // 先落库/写日志（确保前端 loadHistory 重载时已读到那条失败回答，避免「回复一闪而过」），
+                                // 再发 error 终结帧并关闭流（前端必定解除流式锁定）。二者任一异常仅告警，绝不阻断。
                                 try {
                                     finalizeAssistantFailed(assistantMsgId, convId, partial, enrichedCtx);
                                 } catch (Exception ex) {
@@ -275,6 +279,8 @@ public class ConversationService {
                                 } catch (Exception ex) {
                                     log.warn("write log error-path convId={}", conversationId, ex);
                                 }
+                                sendError(emitter, err.getMessage());
+                                closeQuietly(emitter);
                             },
                             () -> {
                                 String full = answer.toString();
@@ -282,11 +288,8 @@ public class ConversationService {
                                         : estimateTokens(enrichedCtx.getMessages());
                                 int outTok = usage.getCompletionTokens() > 0 ? usage.getCompletionTokens()
                                         : estimateTokens(full);
-                                // 先发 done 终结帧并关闭流，确保前端必定解除流式锁定；
-                                // 即便后续落库/写日志抛异常，也不会漏发关闭信号（否则前端输入框会被永久锁死）。
-                                sendDone(emitter, enrichedCtx, inTok, outTok, false);
-                                closeQuietly(emitter);
-                                // 落库/写日志为服务端尽力而为，失败仅告警，绝不阻断前端交互。
+                                // 先落库/写日志（确保前端 loadHistory 重载时一定已读到完整回答，避免「回复一闪而过」）；
+                                // 再发 done 终结帧并关闭流（前端必定解除流式锁定）。二者任一异常仅告警，绝不阻断前端。
                                 try {
                                     finalizeAssistantOk(assistantMsgId, convId, full, enrichedCtx, outTok);
                                 } catch (Exception ex) {
@@ -297,6 +300,8 @@ public class ConversationService {
                                 } catch (Exception ex) {
                                     log.warn("write log convId={} failed", conversationId, ex);
                                 }
+                                sendDone(emitter, enrichedCtx, inTok, outTok, false);
+                                closeQuietly(emitter);
                             }
                     );
             // 记下订阅句柄，供 §4.6 SSE 断连时取消（不白烧 token）
@@ -309,7 +314,7 @@ public class ConversationService {
     }
 
     /** 组装编排上下文：解析 Agent → 取厂商配置 → 召回知识 → 拼最终 messages。 */
-    private ChatContext prepare(ChatRequest req, Long userId, Conversation conv) {
+    private ChatContext prepare(ChatRequest req, Long userId, Conversation conv, SseEmitter emitter) {
         String conversationId = conv.getConversationId();
         String agentIdStr = req.agentId();
         Long agentDbId = parseAgentId(agentIdStr);
@@ -337,7 +342,30 @@ public class ConversationService {
                 .question(req.message())
                 .history(history)
                 .build();
-        ctx = ctx.withRetrievedKnowledge(retrieveKnowledge(ctx));
+        boolean hasKB = ctx.getKnowledgeRefs() != null && !ctx.getKnowledgeRefs().isEmpty();
+        if (hasKB) sendStep(emitter, "正在检索知识库…", "running", "retrieval");
+        List<RetrievalPort.RetrievedChunk> hits = retrieveKnowledge(ctx);
+        String knowledge = toKnowledgeText(hits);
+        if (hasKB) {
+            sendStep(emitter, knowledge != null && !knowledge.isEmpty()
+                    ? "知识库检索完成，已获取相关资料" : "知识库检索完成（无命中片段）", "done", "retrieval");
+        }
+        // 记录知识库检索轨迹：每条命中都留痕（含 docId / 相似度 / 片段摘要）；即便无命中也记一条，
+        // 满足对话日志铁律「KB 调用记录必须持久化、可事后回看，即便模型最终未引用也要留痕」。
+        if (hits.isEmpty()) {
+            ctx.getTrace().add(new CallTrace("retrieval", "知识库检索完成（无命中片段）",
+                    "done", null, null, null, null, null, true));
+        } else {
+            for (RetrievalPort.RetrievedChunk h : hits) {
+                String snippet = h.content() == null ? "" : h.content();
+                if (snippet.length() > 200) snippet = snippet.substring(0, 200) + "…";
+                ctx.getTrace().add(new CallTrace("retrieval",
+                        "知识库命中：文档 " + h.documentId() + " 片段#" + h.chunkIndex()
+                                + "（相似度 " + String.format("%.3f", h.score()) + "）",
+                        "done", h.documentId(), h.score(), null, null, snippet, true));
+            }
+        }
+        ctx = ctx.withRetrievedKnowledge(knowledge);
         ctx = ctx.withMessages(buildMessages(ctx));
         return ctx;
     }
@@ -366,35 +394,45 @@ public class ConversationService {
 
     /**
      * 召回知识（带 fallback）：任一切库失败都跳过该库；全部不可用也不阻断 LLM 直接答（§3.3 / T3 验收点3）。
-     * 多库结果合并后按相似度降序取 topK。
+     * 多库结果合并后按相似度降序返回全部命中（topK 截断留给 {@link #toKnowledgeText}）。
+     *
+     * @return 命中片段列表（含相似度），无命中或不可用返回空列表，不返回 null。
      */
-    private String retrieveKnowledge(ChatContext ctx) {
+    private List<RetrievalPort.RetrievedChunk> retrieveKnowledge(ChatContext ctx) {
         if (ctx.getKnowledgeRefs().isEmpty()) {
-            return "";
+            return List.of();
         }
         try {
             List<RetrievalPort.RetrievedChunk> hits = new ArrayList<>();
             for (Long kbId : ctx.getKnowledgeRefs()) {
                 try {
-                    hits.addAll(retrievalPort.retrieve(ctx.getQuestion(), kbId, RETRIEVE_TOP_K, RETRIEVE_THRESHOLD));
+                    // K11 缺陷 A：先取本库未软删的文档业务 id，下推 PG 用 document_id IN(...) 过滤孤儿 chunk
+                    List<String> allowedDocIds = documentRepository.findByKbId(kbId).stream()
+                            .map(Document::getDocumentId).toList();
+                    hits.addAll(retrievalPort.retrieve(ctx.getQuestion(), allowedDocIds, RETRIEVE_TOP_K, RETRIEVE_THRESHOLD));
                 } catch (Exception e) {
                     log.warn("knowledge retrieve failed for kbId={}, skip", kbId, e);
                 }
             }
-            if (hits.isEmpty()) {
-                return "";
-            }
             hits.sort(Comparator.comparingDouble(RetrievalPort.RetrievedChunk::score).reversed());
-            int take = Math.min(RETRIEVE_TOP_K, hits.size());
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < take; i++) {
-                sb.append("- ").append(hits.get(i).content()).append("\n");
-            }
-            return sb.toString().strip();
+            return hits;
         } catch (Exception e) {
             log.warn("knowledge retrieval unavailable, continue without context", e);
+            return List.of();
+        }
+    }
+
+    /** 把命中片段拼成塞进 system 提示的知识文本（多库合并后取 topK）。 */
+    private String toKnowledgeText(List<RetrievalPort.RetrievedChunk> hits) {
+        if (hits.isEmpty()) {
             return "";
         }
+        int take = Math.min(RETRIEVE_TOP_K, hits.size());
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < take; i++) {
+            sb.append("- ").append(hits.get(i).content()).append("\n");
+        }
+        return sb.toString().strip();
     }
 
     /**
@@ -407,7 +445,7 @@ public class ConversationService {
      * @param ctx 已组装的编排上下文
      * @return 可能追加了工具结果消息的上下文
      */
-    private ChatContext enrichWithMcpTools(ChatContext ctx) {
+    private ChatContext enrichWithMcpTools(ChatContext ctx, SseEmitter emitter) {
         List<Long> toolRefs = ctx.getToolRefs();
         if (toolRefs == null || toolRefs.isEmpty()) {
             return ctx;
@@ -415,24 +453,44 @@ public class ConversationService {
         StringBuilder toolCtx = new StringBuilder();
         for (Long serverId : toolRefs) {
             try {
+                sendStep(emitter, "正在调用 MCP 工具：server #" + serverId, "running", "tool");
                 List<ToolDefinition> tools = mcpService.listTools(serverId);
                 if (tools == null || tools.isEmpty()) {
                     toolCtx.append("\n- [MCP server ").append(serverId).append("] 未发现可用工具");
+                    sendStep(emitter, "MCP server #" + serverId + "：未发现可用工具", "done", "tool");
+                    ctx.getTrace().add(new CallTrace("tool",
+                            "MCP server #" + serverId + "：未发现可用工具", "done",
+                            null, null, null, null, null, false));
                     continue;
                 }
                 // 简单场景取第一个工具调用（生产可交由模型按意图选工具，超出 T3 范围）；参数用用户问题
                 ToolDefinition td = tools.get(0);
-                McpToolCallResult res = mcpService.callTool(serverId, td.name(), buildMcpArgs(ctx.getQuestion()));
-                if (res.fallback() || !res.success()) {
+                String argsJson = buildMcpArgs(ctx.getQuestion());
+                McpToolCallResult res = mcpService.callTool(serverId, td.name(), argsJson);
+                String full = res.result() == null ? "" : res.result();
+                String snippet = full.length() > 200 ? full.substring(0, 200) + "…" : full;
+                boolean ok = !(res.fallback() || !res.success());
+                if (!ok) {
                     toolCtx.append("\n- [MCP server ").append(serverId).append("] 工具暂时不可用");
+                    sendStep(emitter, "MCP server #" + serverId + "：工具暂时不可用", "done", "tool");
                 } else {
                     toolCtx.append("\n- [MCP server ").append(serverId).append(" / ").append(td.name())
                             .append("] 工具结果：").append(res.result());
+                    String stepSnippet = snippet.length() > 60 ? snippet.substring(0, 60) + "…" : snippet;
+                    sendStep(emitter, "MCP 工具返回：" + stepSnippet, "done", "tool");
                 }
+                // 记录 MCP 调用轨迹（入参/出参/状态），满足对话日志铁律
+                ctx.getTrace().add(new CallTrace("tool",
+                        "MCP " + td.name() + " @server#" + serverId + (ok ? " 成功" : " 不可用"),
+                        "done", null, null, td.name(), argsJson, snippet, ok));
             } catch (Exception e) {
                 // 防御：即便 McpService 契约保证不抛，也兜底降级，绝不让对话崩（§4.5）
                 log.warn("mcp enrich unexpected error serverId={}", serverId, e);
                 toolCtx.append("\n- [MCP server ").append(serverId).append("] 工具暂时不可用");
+                sendStep(emitter, "MCP server #" + serverId + "：工具暂时不可用", "done", "tool");
+                ctx.getTrace().add(new CallTrace("tool",
+                        "MCP server #" + serverId + "：调用异常降级", "done",
+                        null, null, null, null, e.getMessage(), false));
             }
         }
         if (toolCtx.length() == 0) {
@@ -478,6 +536,7 @@ public class ConversationService {
             m.setStatus(Message.MessageStatus.SENT);
             m.setProvider(ctx.getProviderType());
             m.setTokens(outTok);
+            m.setTraceJson(writeTrace(ctx));
             messageRepository.save(m);
         });
         conversationRepository.findById(convId).ifPresent(c -> {
@@ -494,6 +553,7 @@ public class ConversationService {
             m.setStatus(Message.MessageStatus.FAILED);
             m.setProvider(ctx.getProviderType());
             m.setTokens(estimateTokens(partial));
+            m.setTraceJson(writeTrace(ctx));
             messageRepository.save(m);
         });
         conversationRepository.findById(convId).ifPresent(c -> {
@@ -522,24 +582,38 @@ public class ConversationService {
                 Duration.between(start, Instant.now()).toMillis());
     }
 
+    /** 把编排过程累积的调用轨迹序列化为 JSON（落库 message.trace_json）。序列化失败降级为空数组，绝不阻断落库。 */
+    private String writeTrace(ChatContext ctx) {
+        try {
+            return objectMapper.writeValueAsString(ctx.getTrace());
+        } catch (Exception e) {
+            log.debug("trace serialize failed convId={}", ctx.getConversationId(), e);
+            return "[]";
+        }
+    }
+
     // ===================== SSE 事件发送 =====================
 
     private void sendMeta(SseEmitter emitter, ChatContext ctx) {
         send(emitter, new ChatEvent("meta", ctx.getConversationId(), Instant.now().toString(),
-                null, null, null, null, null, null, null));
+                null, null, null, null, null, null, null, null, null));
     }
 
     private void sendToken(SseEmitter emitter, String content) {
-        send(emitter, new ChatEvent("token", null, null, content, null, null, null, null, null, null));
+        send(emitter, new ChatEvent("token", null, null, content, null, null, null, null, null, null, null, null));
+    }
+
+    private void sendStep(SseEmitter emitter, String label, String status, String kind) {
+        send(emitter, new ChatEvent("step", null, null, label, null, null, null, null, null, null, kind, status));
     }
 
     private void sendDone(SseEmitter emitter, ChatContext ctx, int inTok, int outTok, boolean fallback) {
         send(emitter, new ChatEvent("done", null, null, null, inTok, outTok,
-                ctx.getProviderType(), ctx.getModel(), fallback, null));
+                ctx.getProviderType(), ctx.getModel(), fallback, null, null, null));
     }
 
     private void sendError(SseEmitter emitter, String message) {
-        send(emitter, new ChatEvent("error", null, null, null, null, null, null, null, null, message));
+        send(emitter, new ChatEvent("error", null, null, null, null, null, null, null, null, message, null, null));
     }
 
     void send(SseEmitter emitter, ChatEvent event) {
@@ -633,7 +707,8 @@ public class ConversationService {
                 m.getRole() == null ? null : m.getRole().name(),
                 m.getContent(),
                 m.getSeq(),
-                m.getCreatedAt() == null ? null : m.getCreatedAt().toInstant(ZoneOffset.UTC)
+                m.getCreatedAt() == null ? null : m.getCreatedAt().toInstant(ZoneOffset.UTC),
+                m.getTraceJson()
         );
     }
 
@@ -641,7 +716,7 @@ public class ConversationService {
      * SSE 事件载荷（强类型事件对象，避免 SSE 序列化时散落裸字段）。
      *
      * <p>大白话：每个事件就是一个 JSON 对象，前端按 {@code event} 字段分流——
-     * meta（首帧，流式才发）/ token（逐字）/ done（结束，含 token 统计）/ error（失败）。
+     * meta（首帧，流式才发）/ token（逐字）/ step（进度：retrieval 知识库检索 / tool MCP 工具调用）/ done（结束，含 token 统计）/ error（失败）。
      * {@code @JsonInclude(NON_NULL)} 保证只序列化非空的字段，线格式即 {@code {"event":"token","content":"..."}}。
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -655,7 +730,11 @@ public class ConversationService {
             String provider,
             String model,
             Boolean fallback,
-            String message
+            String message,
+            /** 步骤事件类型：retrieval=知识库检索 / tool=MCP 工具调用（前端进度条用）。 */
+            String kind,
+            /** 步骤状态：running=进行中 / done=完成（前端进度条用）。 */
+            String stepStatus
     ) {
     }
 }
