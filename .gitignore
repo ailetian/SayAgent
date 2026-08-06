@@ -27,6 +27,9 @@ backend/_rebuild.sh
 backend/mvn
 # 解压 jar 的临时构建目录
 backend/_tmp/
+# fat jar 解包出来的运行目录（classes + lib），纯构建产物，不入库
+/BOOT-INF/
+backend/BOOT-INF/
 
 # ---------- Node / Vue (frontend) ----------
 frontend/node_modules/
@@ -35,6 +38,8 @@ frontend/.vite/
 frontend/*.log
 frontend/_dev_*.log
 frontend/_dev_*.out
+# vite 依赖优化产生的临时配置快照
+frontend/vite.config.js.timestamp-*.mjs
 # 见下方“凭据”段：真实 .env 不入库，只留 .env.example
 
 # ---------- Python (rag-knowledge / _temp) ----------
