@@ -7,6 +7,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
 
@@ -39,5 +41,17 @@ public class PgDataSourceConfig {
     @Bean(name = "pgNamedJdbcTemplate")
     public NamedParameterJdbcTemplate pgNamedJdbcTemplate(@Qualifier("pgJdbcTemplate") JdbcTemplate pgJdbcTemplate) {
         return new NamedParameterJdbcTemplate(pgJdbcTemplate);
+    }
+
+    /**
+     * Pg 向量库（第二数据源）的事务管理器（K11 缺陷 B）。
+     *
+     * <p>大白话：pg 是独立于 MySQL 的第二数据源，裸 JDBC 默认自动提交，事务不可达。
+     * 这里显式建一个 {@code pgTransactionManager}，让 {@code DocumentChunkRepository.replaceChunks}
+     * （删旧切片 + 插新切片）能在一个 pg 本地事务里原子完成，避免崩溃残留"半套 chunk"。
+     */
+    @Bean(name = "pgTransactionManager")
+    public PlatformTransactionManager pgTransactionManager(@Qualifier("pgDataSource") DataSource pgDataSource) {
+        return new DataSourceTransactionManager(pgDataSource);
     }
 }

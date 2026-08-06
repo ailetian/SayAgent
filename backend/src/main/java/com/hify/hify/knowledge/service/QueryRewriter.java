@@ -2,6 +2,8 @@ package com.hify.hify.knowledge.service;
 
 import com.hify.hify.modelprovider.client.ChatMessage;
 
+import org.springframework.stereotype.Component;
+
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,6 +25,7 @@ import java.util.regex.Pattern;
  *
  * <p>注意：历史的"存最近 6~10 轮"由上层（K8 接口层）负责截取后传入，本类只消费传入的 {@code history}。
  */
+@Component
 public class QueryRewriter {
 
     /** 指代消解：从最近一条用户消息里抠出核心名词时的中文疑问词（先剔除再取前部名词）。 */
@@ -31,6 +34,9 @@ public class QueryRewriter {
 
     /** 取字符串开头的连续「中文/字母/数字/下划线/间隔号」片段作为候选名词（最长 8）。 */
     private static final Pattern LEADING_NOUN = Pattern.compile("^([\\u4e00-\\u9fa5A-Za-z0-9_·]{1,8})");
+
+    /** 名词后常见的尾缀动词/语气字（抠完疑问词后再去掉，避免「年假请」残留「请」）。 */
+    private static final Pattern TRAILING_VERB = Pattern.compile("[请问说查看了吧哦嘛呀呗]+$");
 
     /** 那X呢 / 这X呢：X 为显式名词（非量词开头），直接抽取 X 作为焦点。 */
     private static final Pattern DEMONSTRATIVE =
@@ -88,10 +94,16 @@ public class QueryRewriter {
         return stripFiller(cleaned);
     }
 
-    /** 口语清理：去头尾 filler。 */
+    /** 口语清理：循环去头部寒暄，再去尾部客套词与标点。 */
     private String stripFiller(String text) {
-        String t = LEADING_FILLER.matcher(text).replaceFirst("");
+        String t = text;
+        String prev;
+        do {
+            prev = t;
+            t = LEADING_FILLER.matcher(t).replaceFirst("");
+        } while (!t.equals(prev));
         t = TRAILING_FILLER.matcher(t).replaceFirst("");
+        t = t.replaceAll("[？?。.！!]+$", "");
         return t.strip();
     }
 
@@ -109,9 +121,10 @@ public class QueryRewriter {
         return null;
     }
 
-    /** 从一句话里抠出核心名词：先剔疑问词，再取开头连续名词片段。 */
+    /** 从一句话里抠出核心名词：先剔疑问词，再去尾缀动词，取开头连续名词片段。 */
     private String extractNoun(String text) {
         String t = QUESTION_WORDS.matcher(text).replaceAll("");
+        t = TRAILING_VERB.matcher(t).replaceAll("");
         t = t.strip();
         if (t.isEmpty()) {
             return null;

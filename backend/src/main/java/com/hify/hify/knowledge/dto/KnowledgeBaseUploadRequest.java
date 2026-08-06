@@ -16,8 +16,10 @@ public record KnowledgeBaseUploadRequest(
         String filename,
         /** 文档标题（可空，默认取文件名）。 */
         String title,
-        /** 文本内容（TEXT 时必填；FILE/URL 时为解析后的正文）。 */
-        String content,
-        /** 来源 URL（URL 时必填）。 */
-        String sourceUrl) {
+    /** 文本内容（TEXT 时必填；FILE/URL 时为解析后的正文）。 */
+    String content,
+    /** 来源 URL（URL 时必填）。 */
+    String sourceUrl,
+    /** 文档业务 id（更新/重传时必带：复用同一篇文档身份，撕掉旧切片贴新切片；新建时为空）。K11 */
+    String documentId) {
 }

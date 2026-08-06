@@ -1,12 +1,16 @@
 package com.hify.hify.common.config;
 
 import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 
+import jakarta.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
 
 /**
@@ -29,5 +33,21 @@ public class PgVectorConfig {
         // （且会让 @DataJpaTest / @SpringBootTest 因缺 jdbcUrl 而加载失败）。
         // initializeDataSourceBuilder() 会把标准 url 正确写入 jdbcUrl，同时兼容自动配置、@DataJpaTest、@SpringBootTest 与 java -jar。
         return properties.initializeDataSourceBuilder().type(HikariDataSource.class).build();
+    }
+
+    /**
+     * 主库（MySQL）JPA 事务管理器（修复 K 系列「No bean named 'transactionManager'」）。
+     *
+     * <p>大白话：Pg 第二数据源显式定义了 {@code pgTransactionManager}（一个 {@code PlatformTransactionManager}），
+     * 触发 Spring Boot JPA 自动配置的「缺 Bean 才创建」跳过条件——主库 JPA 仓储默认要找的
+     * {@code transactionManager} 根本没被生成。于是所有走 MySQL JPA 的写/读（{@code save} / {@code findById} /
+     * {@code requireAccessible} 判权）都在 {@code TransactionInterceptor} 阶段因找不到 transactionManager 而抛 5000。
+     * 这里显式为主库建一个 {@code transactionManager}（@Primary），所有 MySQL JPA 仓储的事务顾问即可命中。
+     */
+    @Primary
+    @Bean(name = "transactionManager")
+    public PlatformTransactionManager transactionManager(
+            @Qualifier("entityManagerFactory") EntityManagerFactory entityManagerFactory) {
+        return new JpaTransactionManager(entityManagerFactory);
     }
 }

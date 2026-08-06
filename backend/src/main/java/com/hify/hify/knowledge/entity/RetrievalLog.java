@@ -40,8 +40,11 @@ public class RetrievalLog extends BaseEntity {
     @Column(name = "kb_id", nullable = true)
     private Long kbId;
 
-    /** Agent id。 */
-    @Column(name = "agent_id", nullable = false)
+    /**
+     * Agent id。允许为空：知识库直问（/knowledge/{kbId}/ask，K8）没有 Agent 上下文时置空，
+     * 但仍需记一条检索日志（§5.6「每次问答记账」）；与 {@code kb_id} 对称可空。日志不建外键。
+     */
+    @Column(name = "agent_id", nullable = true)
     private Long agentId;
 
     /** 用户原始提问。 */

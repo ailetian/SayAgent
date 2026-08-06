@@ -61,6 +61,7 @@ public class AgentService {
         Agent a = new Agent();
         a.setName(req.name());
         a.setDescription(req.description() != null ? req.description() : "");
+        a.setCreatedBy(currentUser());           // K7：记录创建者，挂载权限判定（创建者/admin 可改挂载）
         a.setSystemPrompt(req.systemPrompt());
         a.setModelProviderId(req.modelProviderId());
         a.setModel(req.model());
@@ -174,11 +175,43 @@ public class AgentService {
 
     /** 服务层权限再核（§7.11）：当前登录用户须为 ROLE_ADMIN，否则 FORBIDDEN。 */
     private void assertAdmin() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        boolean admin = auth != null && auth.getAuthorities().stream()
-                .anyMatch(au -> "ROLE_ADMIN".equals(au.getAuthority()));
-        if (!admin) {
+        if (!isAdmin()) {
             throw new BizException(ErrorCode.FORBIDDEN, "仅 ADMIN 可增删改 Agent");
         }
+    }
+
+    /**
+     * 当前登录用户能否管理某 Agent 的知识库挂载（K7 挂载权，§3.5）。
+     *
+     * <p>大白话：挂载权 = Agent 创建者 或 管理员。供 knowledge 模块的 {@code MountService} 跨模块调用，
+     * 不泄露 agent 内部实体/repo（只返 boolean，符合 §3.2 跨模块只依赖接口）。
+     *
+     * @param agentId 目标 Agent id
+     * @return true = 可增删挂载；false = 既非创建者也非管理员
+     */
+    public boolean canManageMounts(Long agentId) {
+        if (isAdmin()) {
+            return true;
+        }
+        Agent agent = repository.findById(agentId)
+                .orElseThrow(() -> new BizException(ErrorCode.AGENT_NOT_FOUND, "id=" + agentId));
+        String me = currentUser();
+        return me != null && me.equals(agent.getCreatedBy());
+    }
+
+    /** 当前登录用户是否管理员（ROLE_ADMIN）。 */
+    private boolean isAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getAuthorities().stream()
+                .anyMatch(au -> "ROLE_ADMIN".equals(au.getAuthority()));
+    }
+
+    /** 取当前登录用户名（AuthFilter 将 username 写入 SecurityContext principal）。 */
+    private String currentUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getName() == null) {
+            return null;
+        }
+        return auth.getName();
     }
 }

@@ -166,15 +166,31 @@ public class ProviderRouter {
         return toConfig(resolveEmbeddingProvider());
     }
 
-    /** 选默认 embedding 模型：先按 default=true，再退化为第一个启用的模型。 */
+    /**
+     * 默认对话（生成）模型的连接配置（apiUrl/apiKey/model）。
+     *
+     * <p>供 knowledge 模块 RAG 问答（K5/K8）生成答案时使用——只把「这次调用要什么」抽成 {@link ProviderConfig}，
+     * 秘钥仍只在 {@code toConfig} 内部从数据库取出、绝不落库/打印（§7.11）。选取逻辑复用 {@code defaultProvider()}：
+     * 优先 {@code default_model=true} 的启用模型，否则取 {@code sort_order} 最前的启用模型。
+     */
+    public ProviderConfig getDefaultChatConfig() {
+        return toConfig(defaultProvider());
+    }
+
+    /** 选默认 embedding 模型：优先本地 BGE-M3（设计：Embedding=BGE-M3 1024维，Ollama 本地化，不占外部 key/不吃额外内存）；找不到再退化为 default_model / 首个启用模型。 */
     private ModelProvider resolveEmbeddingProvider() {
         List<ModelProvider> all = repository.findAll();
         return all.stream()
-                .filter(p -> Boolean.TRUE.equals(p.getEnabled()) && Boolean.TRUE.equals(p.getDefaultModel()))
+                .filter(p -> Boolean.TRUE.equals(p.getEnabled())
+                        && p.getModel() != null
+                        && p.getModel().toLowerCase().contains("bge-m3"))
                 .min(Comparator.comparingInt(p -> p.getSortOrder() == null ? Integer.MAX_VALUE : p.getSortOrder()))
                 .orElseGet(() -> all.stream()
-                        .filter(p -> Boolean.TRUE.equals(p.getEnabled()))
+                        .filter(p -> Boolean.TRUE.equals(p.getEnabled()) && Boolean.TRUE.equals(p.getDefaultModel()))
                         .min(Comparator.comparingInt(p -> p.getSortOrder() == null ? Integer.MAX_VALUE : p.getSortOrder()))
-                        .orElseThrow(() -> new BizException(ErrorCode.MODEL_NOT_FOUND, "未配置可用的 embedding 模型")));
+                        .orElseGet(() -> all.stream()
+                                .filter(p -> Boolean.TRUE.equals(p.getEnabled()))
+                                .min(Comparator.comparingInt(p -> p.getSortOrder() == null ? Integer.MAX_VALUE : p.getSortOrder()))
+                                .orElseThrow(() -> new BizException(ErrorCode.MODEL_NOT_FOUND, "未配置可用的 embedding 模型"))));
     }
 }

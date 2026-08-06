@@ -68,7 +68,7 @@ public class KnowledgeBase extends BaseEntity {
             columnDefinition = "decimal(4,3) default 0.600")
     private BigDecimal similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD;
 
-    /** 创建者登录名(username)，仅审计用；访问权统一由 kb_access 表管理（RBAC，M5 整改）。 */
+    /** 创建者登录名(username)；管理权 = 创建者 或 管理员（K7 退役 KbAccess 后，查询权委托 Agent 挂载）。 */
     @Column(name = "creator_id", length = 64)
     private String creatorId;
 

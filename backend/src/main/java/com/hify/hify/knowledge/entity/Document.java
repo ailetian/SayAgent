@@ -77,6 +77,14 @@ public class Document extends BaseEntity {
     @Column(name = "mime_type", length = 100)
     private String mimeType;
 
+    /** 上传提供的原始文本（TEXT/URL/内容型上传），索引流水线 PARSE 阶段读取，断点续跑免重解析（K6 V22）。 */
+    @Column(name = "raw_content", columnDefinition = "TEXT")
+    private String rawContent;
+
+    /** 断点续跑暂存：切片文本 JSON 数组；EMBED/STORE 失败续跑免重切，成功后清空（K6 V22）。 */
+    @Column(name = "index_payload", columnDefinition = "TEXT")
+    private String indexPayload;
+
     /** 单文档 token 成本。 */
     @Column(name = "token_count")
     private Integer tokenCount = 0;

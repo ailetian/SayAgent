@@ -4,6 +4,7 @@ import com.hify.hify.knowledge.config.RagConfig;
 
 import java.util.List;
 
+
 /**
  * 知识库向量检索端口（M5/T4）。
  *
@@ -13,28 +14,34 @@ import java.util.List;
 public interface RetrievalPort {
 
     /**
-     * 检索与查询向量最相似的 Top-k 个文档片段。
+     * 检索与查询向量最相似的 Top-k 个文档片段（K11 软删预过滤版）。
      *
      * <p>相似度用余弦相似度（pg 向量库 {@code <=>} 算子即余弦距离）衡量，返回结果按相似度降序排列。
+     * {@code allowedDocIds} 是"<b>当前知识库内未被软删的文档业务 id</b>"清单（由调用方从 MySQL 取后下推，
+     * 业务表在 MySQL、chunk 在 PG，两库无法 JOIN），PG 用 {@code document_id IN (...)} 过滤掉孤儿 chunk
+     * （被软删文档的切片绝不召回，K11 缺陷 A）。清单为空则直接返回空，绝不发生未过滤的查询。
      *
      * @param queryEmbedding 查询文本的向量（由 EmbeddingService 产出），非空、维度与入库切片一致
-     * @param kbId           知识库 ID，用于隔离（已合入的 T1 实际落地为 document_chunk.kb_id 列）
+     * @param allowedDocIds  当前知识库内未软删的文档业务 id 列表（与 document_chunk.document_id 同口径）
      * @param topK           返回片段数，&gt;=1
      * @param threshold      相似度阈值，低于此值的 chunk 在检索时被过滤（T4 验收点3）
      * @return 按余弦相似度降序的片段列表（含相似度 score）；无命中返回空列表，不返回 null
      */
-    List<RetrievedChunk> retrieve(float[] queryEmbedding, Long kbId, int topK, double threshold);
+    List<RetrievedChunk> retrieve(float[] queryEmbedding, List<String> allowedDocIds, int topK, double threshold);
 
     /**
      * 接收原始查询文本，端口内完成向量化后检索（供 conversation 等调用方免感知 EmbeddingService）。
      *
-     * @param queryText 原始查询文本（如最新一条用户消息）
-     * @param kbId      知识库 ID
-     * @param topK      返回片段数，&gt;=1
-     * @param threshold 相似度阈值，低于此值的 chunk 在检索时被过滤
+     * <p>与 {@link #retrieve(float[], List, int, double)} 同语义，仅入口是原始文本（端口内向量化），
+     * 同样按 {@code allowedDocIds} 做软删预过滤。
+     *
+     * @param queryText      原始查询文本（如最新一条用户消息）
+     * @param allowedDocIds  当前知识库内未软删的文档业务 id 列表
+     * @param topK           返回片段数，&gt;=1
+     * @param threshold      相似度阈值，低于此值的 chunk 在检索时被过滤
      * @return 按余弦相似度降序的片段列表（含相似度 score）；无命中返回空列表，不返回 null
      */
-    List<RetrievedChunk> retrieve(String queryText, Long kbId, int topK, double threshold);
+    List<RetrievedChunk> retrieve(String queryText, List<String> allowedDocIds, int topK, double threshold);
 
     /**
      * 混合检索（K4，R2 双路 + RRF 融合 + 跨库软删下推 P1）。

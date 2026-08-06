@@ -9,7 +9,6 @@ import com.hify.hify.knowledge.util.PgVectorUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -42,7 +41,6 @@ import java.util.Map;
 @Slf4j
 public class PgVectorRetrievalPort implements RetrievalPort {
 
-    private final JdbcTemplate pgJdbcTemplate;
     private final EmbeddingService embeddingService;
     private final DocumentRepository documentRepository;
     private final NamedParameterJdbcTemplate pgNamedJdbcTemplate;
@@ -71,45 +69,57 @@ public class PgVectorRetrievalPort implements RetrievalPort {
             + " AND to_tsvector(:tsConfig, content) @@ plainto_tsquery(:tsConfig, :q)"
             + " ORDER BY " + SCORE_COLUMN + " DESC LIMIT :limit";
 
-    public PgVectorRetrievalPort(@Qualifier("pgJdbcTemplate") JdbcTemplate pgJdbcTemplate,
-                                 EmbeddingService embeddingService,
+    public PgVectorRetrievalPort(EmbeddingService embeddingService,
                                  DocumentRepository documentRepository,
                                  @Qualifier("pgNamedJdbcTemplate") NamedParameterJdbcTemplate pgNamedJdbcTemplate) {
-        this.pgJdbcTemplate = pgJdbcTemplate;
         this.embeddingService = embeddingService;
         this.documentRepository = documentRepository;
         this.pgNamedJdbcTemplate = pgNamedJdbcTemplate;
     }
 
-    // ===================== 语义单路（保留 T4 能力，不重写） =====================
+    // ===================== 语义单路（K11 软删预过滤版） =====================
+
+    /** 语义单路 SQL（K11 缺陷 A）：按 allowedDocIds 过滤孤儿 chunk，阈值过滤，取 topK。 */
+    private static final String SINGLE_SQL =
+            "SELECT document_id, seq, content, (1 - (embedding <=> :vec::vector)) AS " + SCORE_COLUMN
+            + " FROM document_chunk WHERE document_id IN (:validDocIds)"
+            + " AND (1 - (embedding <=> :vec::vector)) >= :threshold ORDER BY " + SCORE_COLUMN + " DESC LIMIT :limit";
 
     @Override
-    public List<RetrievedChunk> retrieve(float[] queryEmbedding, Long kbId, int topK, double threshold) {
+    public List<RetrievedChunk> retrieve(float[] queryEmbedding, List<String> allowedDocIds, int topK, double threshold) {
         if (queryEmbedding == null || queryEmbedding.length == 0) {
             return List.of();
         }
-        log.info("retrieve start kbId={} topK={} threshold={} dim={}", kbId, topK, threshold, queryEmbedding.length);
-        // 先算余弦相似度 score，再用 WHERE score >= ? 过滤低于阈值的 chunk（T4 验收点3：阈值真正生效）
-        String sql = "SELECT document_id, seq, content, score FROM ("
-                + " SELECT document_id, seq, content, 1 - (embedding <=> ?::vector) AS " + SCORE_COLUMN
-                + " FROM document_chunk WHERE kb_id = ?"
-                + ") t WHERE " + SCORE_COLUMN + " >= ? ORDER BY " + SCORE_COLUMN + " DESC LIMIT ?";
+        // K11 缺陷 A：无有效文档（全软删/空库）直接返回，绝不发生未过滤查询
+        if (allowedDocIds == null || allowedDocIds.isEmpty()) {
+            log.info("retrieve skip: allowedDocIds empty, no PG query issued");
+            return List.of();
+        }
+        log.info("retrieve start topK={} threshold={} dim={} allowedDocs={}", topK, threshold, queryEmbedding.length, allowedDocIds.size());
+        MapSqlParameterSource params = new MapSqlParameterSource();
+        params.addValue("vec", PgVectorUtils.toPgVector(queryEmbedding));
+        params.addValue("validDocIds", allowedDocIds);
+        params.addValue("threshold", threshold);
+        params.addValue("limit", topK);
         try {
-            List<RetrievedChunk> hits = pgJdbcTemplate.query(
-                    sql, ROW_MAPPER, PgVectorUtils.toPgVector(queryEmbedding), kbId, threshold, topK);
-            log.info("retrieve done kbId={} topK={} threshold={} hits={}", kbId, topK, threshold, hits.size());
+            List<RetrievedChunk> hits = pgNamedJdbcTemplate.query(SINGLE_SQL, params, ROW_MAPPER);
+            log.info("retrieve done topK={} threshold={} hits={}", topK, threshold, hits.size());
             return hits;
         } catch (DataAccessException e) {
             // 捕获具体异常（规则11），翻译成统一业务异常（规则14：必须绑定 ErrorCode）。
-            BizException ex = new BizException(ErrorCode.RETRIEVAL_FAILED, "kbId=" + kbId);
+            BizException ex = new BizException(ErrorCode.RETRIEVAL_FAILED, "allowedDocs=" + allowedDocIds.size());
             ex.initCause(e);
             throw ex;
         }
     }
 
     @Override
-    public List<RetrievedChunk> retrieve(String queryText, Long kbId, int topK, double threshold) {
+    public List<RetrievedChunk> retrieve(String queryText, List<String> allowedDocIds, int topK, double threshold) {
         if (queryText == null || queryText.isBlank()) {
+            return List.of();
+        }
+        // K11 缺陷 A：无有效文档直接返回
+        if (allowedDocIds == null || allowedDocIds.isEmpty()) {
             return List.of();
         }
         // 端口内完成向量化，调用方（conversation）免感知 EmbeddingService（§3.2 解耦）
@@ -117,7 +127,7 @@ public class PgVectorRetrievalPort implements RetrievalPort {
         if (vectors.isEmpty()) {
             return List.of();
         }
-        return retrieve(vectors.get(0), kbId, topK, threshold);
+        return retrieve(vectors.get(0), allowedDocIds, topK, threshold);
     }
 
     // ===================== 混合检索（K4，R2 + 跨库软删 P1） =====================

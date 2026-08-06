@@ -4,6 +4,7 @@ import com.hify.hify.knowledge.util.PgVectorUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -28,6 +29,49 @@ public class DocumentChunkRepository {
         String sql = "INSERT INTO document_chunk (document_id, kb_id, seq, content, embedding) "
                 + "VALUES (?, ?, ?, ?, ?::vector)";
         jdbcTemplate.update(sql, documentId, kbId, seq, content, PgVectorUtils.toPgVector(vector));
+    }
+
+    /**
+     * 原子"删旧 + 插新"替换某文档的全部切片（K11 版本治理 / 防半套 chunk）。
+     *
+     * <p>大白话：重传同一篇文档时，先把这个文档旧的所有 chunk+向量清掉，再一次性批量写新的，
+     * 整个动作落在 {@code pgTransactionManager} 这一个 pg 本地事务里——要么新旧都换好，
+     * 要么一条都不留（中途异常整体回滚），绝不让"新旧两版碎片混在库里"误导检索。
+     * 批量写入（{@code batchUpdate}）比循环单条插更高效（K11 缺陷 K）。
+     *
+     * @param documentId 文档业务 id（与 document_chunk.document_id 同口径）
+     * @param kbId       知识库 id
+     * @param rows       新切片（seq + 文本 + 向量），按 seq 升序
+     */
+    @Transactional("pgTransactionManager")
+    public void replaceChunks(String documentId, Long kbId, List<ChunkRow> rows) {
+        jdbcTemplate.update("DELETE FROM document_chunk WHERE document_id = ?", documentId);
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        String sql = "INSERT INTO document_chunk (document_id, kb_id, seq, content, embedding) "
+                + "VALUES (?, ?, ?, ?, ?::vector)";
+        jdbcTemplate.batchUpdate(sql, rows, rows.size(), (ps, row) -> {
+            ps.setString(1, documentId);
+            ps.setLong(2, kbId);
+            ps.setInt(3, row.seq());
+            ps.setString(4, row.content());
+            ps.setString(5, PgVectorUtils.toPgVector(row.vector()));
+        });
+    }
+
+    /**
+     * 删某文档的全部切片向量（P5 重传删旧 / K11 防半套 chunk）。
+     *
+     * <p>大白话：重传同一文件时，先把它旧的所有 chunk+向量清掉，再写新的，
+     * 绝不让"新旧两版碎片混在库里"误导检索。STORE 阶段每次都先删后写，
+     * 因此重传和断点重试的 STORE 都是幂等的（重复跑不会翻倍）。
+     *
+     * @param documentId 文档业务 id（与 document_chunk.document_id 同口径）
+     */
+    public void deleteByDocumentId(String documentId) {
+        String sql = "DELETE FROM document_chunk WHERE document_id = ?";
+        jdbcTemplate.update(sql, documentId);
     }
 
     /** 按知识库查全部切片（T4 检索前置，这里先提供基础读取；embedding 以字符串形式返回）。 */
@@ -67,5 +111,9 @@ public class DocumentChunkRepository {
 
     /** 向量切片读取结果（轻量 DTO，非 JPA 实体；embedding 为 pg 返回的字符串表示）。 */
     public record DocumentChunk(String documentId, Long kbId, int seq, String content, String embedding) {
+    }
+
+    /** 单条待写入切片（seq + 文本 + 向量），供 {@link #replaceChunks} 批量写入。 */
+    public record ChunkRow(int seq, String content, float[] vector) {
     }
 }

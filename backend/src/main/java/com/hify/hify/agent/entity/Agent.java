@@ -40,6 +40,10 @@ public class Agent extends BaseEntity {
     @Column(nullable = false, columnDefinition = "varchar(500) default ''")
     private String description;
 
+    /** 创建者登录名(username)，用于挂载权限判定（仅创建者/admin 可改 Agent 的知识库挂载，§3.5）。 */
+    @Column(name = "created_by", length = 64)
+    private String createdBy;
+
     @Column(name = "system_prompt", nullable = false, columnDefinition = "text")
     private String systemPrompt;
 

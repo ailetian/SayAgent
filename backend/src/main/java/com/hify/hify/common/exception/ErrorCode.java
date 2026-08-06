@@ -45,6 +45,12 @@ public enum ErrorCode {
     /** 不支持的文件类型（M5 知识库上传解析不支持的 MIME）。 */
     UNSUPPORTED_FILE_TYPE(4002, "不支持的文件类型"),
 
+    /** 批量上传文件数超过上限（K8 单次 ≤10 个）。 */
+    UPLOAD_TOO_MANY(4003, "批量上传文件数超过上限（单次最多 10 个）"),
+
+    /** 单文件超过大小上限（K8 单次 ≤20MB）。 */
+    FILE_TOO_LARGE(4004, "单文件超过大小上限（最多 20MB）"),
+
     /** 请求的资源/路径不存在（例如访问了不存在的 API，映射 HTTP 404，不再被兜底成 5000）。 */
     RESOURCE_NOT_FOUND(4040, "请求的资源不存在"),
 
@@ -74,6 +80,9 @@ public enum ErrorCode {
 
     /** 文档格式损坏或文件头不匹配（改后缀绕过等，K3）。 */
     FORMAT_CORRUPTED(5009, "文档格式损坏或类型不符"),
+
+    /** 索引流水线整体失败兜底（K6）：具体死因已记在 indexing_job.error_code 列，UI 精确报"❌ 解析失败：加密 PDF"之类。 */
+    INDEXING_JOB_FAILED(5010, "文档索引失败"),
 
     /** 系统异常兜底：所有没被具体捕获的未知错误都归它。 */
     SYS_ERROR(5000, "系统异常");

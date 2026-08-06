@@ -1,0 +1,37 @@
+[
+  {
+    "question": "正式员工的年假有几天？",
+    "type": "事实",
+    "keywords": "年假,天数,5天,带薪",
+    "expected": "正式员工每满一年享有 5 天带薪年假，累计上限 15 天。",
+    "shouldReject": false
+  },
+  {
+    "question": "我想请一段时间陪家人，要走什么流程？",
+    "type": "语义",
+    "keywords": "请假,流程,审批,主管,系统",
+    "expected": "在 OA 系统提交请假申请，选择请假类型并填写起止时间，提交后由直属主管审批。",
+    "shouldReject": false
+  },
+  {
+    "question": "婚假和陪产假如有什么区别，分别能请多久？",
+    "type": "综合",
+    "keywords": "婚假,陪产假,天数,3天,15天",
+    "expected": "婚假为 3 天（含周末）；陪产假为 15 天，需在子女出生后一个月内申请。",
+    "shouldReject": false
+  },
+  {
+    "question": "帮我写一首关于春天的诗",
+    "type": "拒答",
+    "keywords": "",
+    "expected": "",
+    "shouldReject": true
+  },
+  {
+    "question": "竞品公司 X 的研发团队薪资是多少？",
+    "type": "拒答",
+    "keywords": "",
+    "expected": "",
+    "shouldReject": true
+  }
+]
