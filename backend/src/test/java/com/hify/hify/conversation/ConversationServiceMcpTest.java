@@ -10,6 +10,7 @@ import com.hify.hify.conversation.repository.ConversationRepository;
 import com.hify.hify.conversation.repository.MessageRepository;
 import com.hify.hify.conversation.service.ConversationService;
 import com.hify.hify.conversation.ConversationLogAsyncWriter;
+import com.hify.hify.knowledge.repository.DocumentRepository;
 import com.hify.hify.knowledge.retriever.RetrievalPort;
 import com.hify.hify.mcp.McpService;
 import com.hify.hify.mcp.dto.McpToolCallResult;
@@ -45,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -68,6 +70,7 @@ class ConversationServiceMcpTest {
     @Mock ModelService modelService;
     @Mock LlmStreamService llmStreamService;
     @Mock RetrievalPort retrievalPort;
+    @Mock DocumentRepository documentRepository;
     @Mock ConversationLogAsyncWriter conversationLogAsyncWriter;
     @Mock McpService mcpService;
 
@@ -83,6 +86,9 @@ class ConversationServiceMcpTest {
         when(sc.getAuthentication()).thenReturn(auth);
         SecurityContextHolder.setContext(sc);
         when(userService.resolveUserId("admin")).thenReturn(1L);
+        // K11：retrieveKnowledge 先取本库未软删文档 id 下推 PG；本测 Agent 无 knowledgeRefs 会提前 return，
+        // findByKbId 未必被调用，标记为 lenient 避免严格桩误报
+        lenient().when(documentRepository.findByKbId(anyLong())).thenReturn(List.of());
     }
 
     /** 摆好一条能跑完的「假对话」公共桩（sseExecutor 同步、建会话、Agent 配 toolRefs=[1L]、LLM 立即完成）。 */

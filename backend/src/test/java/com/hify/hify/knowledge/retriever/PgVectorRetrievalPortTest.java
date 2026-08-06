@@ -11,7 +11,6 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -41,12 +40,12 @@ import static org.mockito.Mockito.when;
  *
  * <p>注：混合检索走 {@link NamedParameterJdbcTemplate}（固定 3 参 {@code query(String, Map, RowMapper)}、
  * {@code IN (:list)} 由它展开），mock 时 arity 固定、不踩变参 stub 的坑。
+ *
+ * <p>K11 软删预过滤版：语义单路 {@code retrieve(float[], List<String> allowedDocIds, int, double)} 通过
+ * 命名参数 {@code :validDocIds} 把"未软删文档 id 集合"下推 PG，过滤孤儿 chunk（缺陷 A）；空集合直接短路。
  */
 @ExtendWith(MockitoExtension.class)
 class PgVectorRetrievalPortTest {
-
-    @Mock
-    private JdbcTemplate pgJdbcTemplate;
 
     @Mock
     private NamedParameterJdbcTemplate pgNamedJdbcTemplate;
@@ -59,9 +58,6 @@ class PgVectorRetrievalPortTest {
 
     @InjectMocks
     private PgVectorRetrievalPort retrievalPort;
-
-    @Captor
-    private ArgumentCaptor<String> sqlCaptor;
 
     @Captor
     private ArgumentCaptor<RowMapper<RetrievalPort.RetrievedChunk>> rowMapperCaptor;
@@ -80,18 +76,21 @@ class PgVectorRetrievalPortTest {
         capturedParams.clear();
     }
 
-    // ===================== 语义单路（T4，保留） =====================
+    // ===================== 语义单路（T4，保留；K11 软删预过滤版） =====================
 
     @Test
-    void testRetrieve_queryAndKbIdAndTopKPassed_buildsCosineSqlWithFilterAndLimit() {
-        when(pgJdbcTemplate.query(sqlCaptor.capture(), rowMapperCaptor.capture(), any(), any(), any(), any()))
+    void testRetrieve_queryAndAllowedDocIds_topKPassed_buildsCosineSqlWithInFilterAndLimit() {
+        when(pgNamedJdbcTemplate.query(anyString(), any(MapSqlParameterSource.class), any(RowMapper.class)))
                 .thenReturn(List.of(new RetrievalPort.RetrievedChunk("d1", 0, "c1", 0.91)));
 
-        List<RetrievalPort.RetrievedChunk> result = retrievalPort.retrieve(new float[]{0.1f, 0.2f}, 1L, 5, TH);
+        List<RetrievalPort.RetrievedChunk> result =
+                retrievalPort.retrieve(new float[]{0.1f, 0.2f}, List.of("d1"), 5, TH);
 
-        String sql = sqlCaptor.getValue().toLowerCase();
+        ArgumentCaptor<String> sqlCap = ArgumentCaptor.forClass(String.class);
+        verify(pgNamedJdbcTemplate).query(sqlCap.capture(), any(MapSqlParameterSource.class), any(RowMapper.class));
+        String sql = sqlCap.getValue().toLowerCase();
         assertTrue(sql.contains("1 - (embedding <=>"), "SQL 必须按余弦相似度（1 - 余弦距离）排序");
-        assertTrue(sql.contains("kb_id ="), "SQL 必须按 kb_id 隔离");
+        assertTrue(sql.contains("document_id in (:"), "SQL 必须按 allowedDocIds 过滤孤儿 chunk（K11 缺陷 A）");
         assertTrue(sql.contains("score >= "), "SQL 必须按相似度阈值过滤低于阈值的 chunk（T4 验收点3）");
         assertTrue(sql.contains("order by score desc"), "结果应降序");
         assertTrue(sql.contains("limit ?"), "必须限制返回条数");
@@ -101,11 +100,11 @@ class PgVectorRetrievalPortTest {
 
     @Test
     void testRetrieve_rowMapper_mapsFields_correctly() throws Exception {
-        when(pgJdbcTemplate.query(any(), rowMapperCaptor.capture(), any(), any(), any(), any()))
+        when(pgNamedJdbcTemplate.query(anyString(), any(MapSqlParameterSource.class), any(RowMapper.class)))
                 .thenReturn(List.of());
 
-        retrievalPort.retrieve(new float[]{0.1f}, 1L, 3, TH);
-        RowMapper<RetrievalPort.RetrievedChunk> mapper = rowMapperCaptor.getValue();
+        retrievalPort.retrieve(new float[]{0.1f}, List.of("d1"), 3, TH);
+        verify(pgNamedJdbcTemplate).query(anyString(), any(MapSqlParameterSource.class), rowMapperCaptor.capture());
 
         ResultSet rs = mock(ResultSet.class);
         when(rs.getString("document_id")).thenReturn("doc-x");
@@ -113,7 +112,7 @@ class PgVectorRetrievalPortTest {
         when(rs.getString("content")).thenReturn("片段内容");
         when(rs.getDouble("score")).thenReturn(0.77);
 
-        RetrievalPort.RetrievedChunk chunk = mapper.mapRow(rs, 0);
+        RetrievalPort.RetrievedChunk chunk = rowMapperCaptor.getValue().mapRow(rs, 0);
 
         assertEquals("doc-x", chunk.documentId());
         assertEquals(2, chunk.chunkIndex());
@@ -123,8 +122,19 @@ class PgVectorRetrievalPortTest {
 
     @Test
     void testRetrieve_emptyQuery_returnsEmptyList_withoutCallingPg() {
-        List<RetrievalPort.RetrievedChunk> result = retrievalPort.retrieve(new float[0], 1L, 5, TH);
+        List<RetrievalPort.RetrievedChunk> result =
+                retrievalPort.retrieve(new float[0], List.of("d1"), 5, TH);
         assertTrue(result.isEmpty());
+        verify(pgNamedJdbcTemplate, never()).query(anyString(), any(MapSqlParameterSource.class), any(RowMapper.class));
+    }
+
+    @Test
+    void testRetrieve_emptyAllowedDocIds_returnsEmptyList_withoutCallingPg() {
+        // K11 缺陷 A：无有效文档（全软删/空库）直接返回，绝不发生未过滤查询
+        List<RetrievalPort.RetrievedChunk> result =
+                retrievalPort.retrieve(new float[]{0.1f}, List.of(), 5, TH);
+        assertTrue(result.isEmpty());
+        verify(pgNamedJdbcTemplate, never()).query(anyString(), any(MapSqlParameterSource.class), any(RowMapper.class));
     }
 
     @Test
@@ -132,9 +142,11 @@ class PgVectorRetrievalPortTest {
         List<RetrievalPort.RetrievedChunk> rows = List.of(
                 new RetrievalPort.RetrievedChunk("d1", 0, "与查询相同的文本", 0.99),
                 new RetrievalPort.RetrievedChunk("d2", 1, "较相关片段", 0.80));
-        when(pgJdbcTemplate.query(any(), any(RowMapper.class), any(), any(), any(), any())).thenReturn(rows);
+        when(pgNamedJdbcTemplate.query(anyString(), any(MapSqlParameterSource.class), any(RowMapper.class)))
+                .thenReturn(rows);
 
-        List<RetrievalPort.RetrievedChunk> topK = retrievalPort.retrieve(new float[]{0.1f, 0.2f}, 1L, 2, TH);
+        List<RetrievalPort.RetrievedChunk> topK =
+                retrievalPort.retrieve(new float[]{0.1f, 0.2f}, List.of("d1", "d2"), 2, TH);
 
         assertEquals(2, topK.size(), "命中数应等于 top-k");
         assertEquals(0.99, topK.get(0).score(), 1e-9);
@@ -143,18 +155,18 @@ class PgVectorRetrievalPortTest {
     }
 
     @Test
-    void testRetrieve_otherKb_returnsEmpty() {
-        List<RetrievalPort.RetrievedChunk> kb1 = List.of(new RetrievalPort.RetrievedChunk("d1", 0, "内容A", 0.9));
-        when(pgJdbcTemplate.query(any(), any(RowMapper.class), any(), any(), any(), any())).thenAnswer(inv -> {
-            Object kb = inv.getArgument(3);
-            return kb.equals(1L) ? kb1 : List.of();
-        });
+    void testRetrieve_filtersByAllowedDocIdsParam_orphanExcluded() {
+        // 检索方只认 allowedDocIds 下推的文档 id；不在其中的 chunk 绝不召回（K11 缺陷 A 的调用方职责）
+        when(pgNamedJdbcTemplate.query(anyString(), any(MapSqlParameterSource.class), any(RowMapper.class)))
+                .thenReturn(List.of(new RetrievalPort.RetrievedChunk("d1", 0, "A", 0.9)));
 
-        List<RetrievalPort.RetrievedChunk> got1 = retrievalPort.retrieve(new float[]{0.1f}, 1L, 5, TH);
-        List<RetrievalPort.RetrievedChunk> got2 = retrievalPort.retrieve(new float[]{0.1f}, 2L, 5, TH);
+        retrievalPort.retrieve(new float[]{0.1f}, List.of("d1"), 5, TH);
 
-        assertEquals(1, got1.size());
-        assertTrue(got2.isEmpty(), "其它知识库(kb)不应命中本库数据");
+        ArgumentCaptor<MapSqlParameterSource> pCap = ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(pgNamedJdbcTemplate).query(anyString(), pCap.capture(), any(RowMapper.class));
+        @SuppressWarnings("unchecked")
+        List<String> pushed = (List<String>) pCap.getValue().getValues().get("validDocIds");
+        assertEquals(List.of("d1"), pushed, "下推的 allowedDocIds 应等于调用方传入的未删文档 id");
     }
 
     // ===================== 混合检索（K4，R2 + P1） =====================

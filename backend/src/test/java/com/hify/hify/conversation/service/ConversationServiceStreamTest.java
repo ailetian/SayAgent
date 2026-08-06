@@ -9,6 +9,7 @@ import com.hify.hify.conversation.entity.Conversation;
 import com.hify.hify.conversation.entity.Message;
 import com.hify.hify.conversation.repository.ConversationRepository;
 import com.hify.hify.conversation.repository.MessageRepository;
+import com.hify.hify.knowledge.repository.DocumentRepository;
 import com.hify.hify.knowledge.retriever.RetrievalPort;
 import com.hify.hify.mcp.McpService;
 import com.hify.hify.modelprovider.domain.enums.ProviderType;
@@ -78,6 +79,8 @@ class ConversationServiceStreamTest {
     @Mock
     private RetrievalPort retrievalPort;
     @Mock
+    private DocumentRepository documentRepository;
+    @Mock
     private ConversationLogAsyncWriter conversationLogAsyncWriter;
     @Mock
     private McpService mcpService;
@@ -99,7 +102,7 @@ class ConversationServiceStreamTest {
 
         svc = new ConversationService(conversationRepository, messageRepository, userService,
                 sseExecutor, agentService, modelService, llmStreamService, retrievalPort,
-                conversationLogAsyncWriter, mcpService);
+                documentRepository, conversationLogAsyncWriter, mcpService);
         spySvc = spy(svc);
         // 拦截 send(...) 记录 SSE 事件，不真正写响应
         doAnswer(inv -> {
@@ -121,6 +124,9 @@ class ConversationServiceStreamTest {
         when(modelService.getProvider(anyLong())).thenReturn(provider);
 
         when(messageRepository.findByConversationIdOrderBySeqAsc(anyString())).thenReturn(List.of());
+        // K11：retrieveKnowledge 先取本库未软删文档 id 下推 PG；本测 Agent 无 knowledgeRefs 会提前 return，
+        // findByKbId 未必被调用，标记为 lenient 避免严格桩误报
+        lenient().when(documentRepository.findByKbId(anyLong())).thenReturn(List.of());
         when(messageRepository.countByConversationId(anyString())).thenReturn(0L);
         when(messageRepository.save(any(Message.class))).thenAnswer(inv -> {
             Message m = inv.getArgument(0);

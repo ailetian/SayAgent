@@ -2,16 +2,15 @@ package com.hify.hify.knowledge.service;
 
 import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
+import com.hify.hify.knowledge.dto.KnowledgeBaseUploadRequest;
 import com.hify.hify.knowledge.entity.Document;
-import com.hify.hify.knowledge.entity.KbAccess;
-import com.hify.hify.knowledge.entity.KbAccessTargetType;
+import com.hify.hify.knowledge.entity.IndexingJob;
 import com.hify.hify.knowledge.entity.KnowledgeBase;
 import com.hify.hify.knowledge.repository.DocumentChunkRepository;
 import com.hify.hify.knowledge.repository.DocumentRepository;
-import com.hify.hify.knowledge.repository.KbAccessRepository;
+import com.hify.hify.knowledge.repository.IndexingJobRepository;
 import com.hify.hify.knowledge.repository.KnowledgeBaseRepository;
 import com.hify.hify.knowledge.retriever.RetrievalPort;
-import com.hify.hify.knowledge.dto.KnowledgeBaseUploadRequest;
 import com.hify.hify.knowledge.web.ChunkVO;
 import com.hify.hify.knowledge.web.DocumentVO;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -26,22 +27,29 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * KnowledgeService（上传 / 检索 / 视图）单测。
+ *
+ * <p>K7 退役 KbAccess 后，访问权模型收敛为「管理权 = 知识库创建者 或 管理员」；查询权委托 Agent 挂载
+ * （见 {@link MountServiceTest}）。本测试覆盖：上传绑定创建者 + 派发索引任务、R8 去重、检索的创建者/管理员
+ * 鉴权、空查询短路等。所有 repo 均为 mock，不连真库（§7.10）。
+ */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class KnowledgeServiceTest {
 
     @Mock KnowledgeBaseRepository kbRepository;
@@ -49,16 +57,21 @@ class KnowledgeServiceTest {
     @Mock DocumentChunkRepository documentChunkRepository;
     @Mock EmbeddingService embeddingService;
     @Mock RetrievalPort retrievalPort;
-    @Mock KbAccessRepository kbAccessRepository;
+    @Mock IndexingJobRepository indexingJobRepository;
+    @Mock IndexingJobService indexingJobService;
 
     private KnowledgeService knowledgeService;
 
     @BeforeEach
     void setUp() {
         loginAs("tester"); // 默认：普通用户，无角色、非管理员
-        Executor sync = Runnable::run;
+        // KbAccessGuard 用真身（K8 §3.7 拆分抽出的共享判权组件）：它只读 SecurityContext + kbRepository，
+        // mock 掉反而测不到「创建者/管理员」这条真实判权链路。
         knowledgeService = new KnowledgeService(kbRepository, documentRepository, documentChunkRepository,
-                embeddingService, sync, retrievalPort, kbAccessRepository);
+                embeddingService, retrievalPort, indexingJobRepository, indexingJobService,
+                new KbAccessGuard(kbRepository));
+        // K11 检索预过滤：retrieve 内部会取本库未删 doc id 下推 PG，默认返回一条避免 NPE
+        when(documentRepository.findByKbId(anyLong())).thenReturn(List.of(new Document()));
     }
 
     /** 把当前登录身份写进 SecurityContext（AuthFilter 会把 username 放进 principal）。 */
@@ -70,119 +83,94 @@ class KnowledgeServiceTest {
                 new UsernamePasswordAuthenticationToken(username, null, authorities));
     }
 
-    // ===== 上传链路（T3）=====
+    // ===== 上传链路（K6 异步 + K7 鉴权）=====
 
     @Test
-    void testUploadDocument_validText_savesDocumentAndIndexesChunks() {
+    void uploadDocument_bindCreatorOnFirstUpload_andDispatchesJob() {
         KnowledgeBase kb = new KnowledgeBase();
-        kb.setId(1L);
+        kb.setId(1L); // creatorId 初始为 null
         when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        when(documentRepository.findByDocumentId(any())).thenReturn(Optional.of(new Document()));
-        when(embeddingService.splitIntoChunks(any())).thenReturn(List.of("s1", "s2"));
-        when(embeddingService.embedSlices(any())).thenReturn(List.of(new float[1024], new float[1024]));
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(
-                List.of(grant(1L, KbAccessTargetType.USER, "tester"))); // 模拟创建者授权已入库
+        when(indexingJobService.findReadyDuplicate(eq(1L), any())).thenReturn(Optional.empty());
+        when(documentRepository.save(any(Document.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(indexingJobRepository.save(any(IndexingJob.class))).thenAnswer(inv -> inv.getArgument(0));
 
         String docId = knowledgeService.uploadDocument(
-                new KnowledgeBaseUploadRequest(1L, Document.SourceType.TEXT, null, "t", "c", null));
+                new KnowledgeBaseUploadRequest(1L, Document.SourceType.TEXT, null, "t", "c", null, null));
 
         assertEquals(36, docId.length());
-        verify(documentRepository, times(2)).save(any());
-        verify(documentChunkRepository, times(2)).saveChunk(any(), any(), anyInt(), any(), any());
+        // 首个上传者被绑定为 creator（K7：不再写 kb_access 授权）
         assertEquals("tester", kb.getCreatorId(), "首个上传者应被绑定为 creator");
-        verify(kbAccessRepository).save(any(KbAccess.class)); // 创建者自动获得访问权
+        verify(indexingJobRepository).save(any(IndexingJob.class));
+        verify(indexingJobService).submit(any()); // 派发到流水线
     }
 
     @Test
-    void testUploadDocument_kbNotFound_throwsKnowledgeBaseNotFound() {
-        when(kbRepository.findById(99L)).thenReturn(Optional.empty());
-
-        BizException ex = assertThrows(BizException.class, () ->
-                knowledgeService.uploadDocument(new KnowledgeBaseUploadRequest(99L, Document.SourceType.TEXT, null, "t", "c", null)));
-        assertEquals(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, ex.getErrorCode());
-    }
-
-    @Test
-    void testUploadDocument_unsupportedFileType_throwsUnsupportedFileType() {
-        KnowledgeBase kb = new KnowledgeBase();
-        kb.setId(1L);
-        when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(
-                List.of(grant(1L, KbAccessTargetType.USER, "tester"))); // 模拟创建者授权已入库
-
-        BizException ex = assertThrows(BizException.class, () ->
-                knowledgeService.uploadDocument(new KnowledgeBaseUploadRequest(1L, Document.SourceType.FILE, "a.exe", "t", "c", null)));
-        assertEquals(ErrorCode.UNSUPPORTED_FILE_TYPE, ex.getErrorCode());
-    }
-
-    @Test
-    void testUploadDocument_embeddingFails_marksDocumentFailed() {
-        KnowledgeBase kb = new KnowledgeBase();
-        kb.setId(1L);
-        when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        when(documentRepository.findByDocumentId(any())).thenReturn(Optional.of(new Document()));
-        when(embeddingService.splitIntoChunks(any())).thenReturn(List.of("s1", "s2"));
-        when(embeddingService.embedSlices(any())).thenThrow(new RuntimeException("embedding boom"));
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(
-                List.of(grant(1L, KbAccessTargetType.USER, "tester"))); // 模拟创建者授权已入库
-
-        knowledgeService.uploadDocument(new KnowledgeBaseUploadRequest(1L, Document.SourceType.TEXT, null, "t", "c", null));
-
-        verify(documentRepository, times(2)).save(any());
-        verify(documentChunkRepository, never()).saveChunk(any(), any(), anyInt(), any(), any());
-    }
-
-    @Test
-    void testUploadDocument_nonCreatorNoGrant_throwsForbidden() {
+    void uploadDocument_nonCreatorNonAdmin_throwsForbidden() {
         KnowledgeBase owned = new KnowledgeBase();
         owned.setId(1L);
         owned.setCreatorId("other");
         when(kbRepository.findById(1L)).thenReturn(Optional.of(owned));
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(List.of()); // 无授权记录
 
         BizException ex = assertThrows(BizException.class, () ->
-                knowledgeService.uploadDocument(new KnowledgeBaseUploadRequest(1L, Document.SourceType.TEXT, null, "t", "c", null)));
-        assertEquals(ErrorCode.FORBIDDEN, ex.getErrorCode(), "非创建者且无授权应被拒");
-        verify(documentRepository, never()).save(any());
+                knowledgeService.uploadDocument(new KnowledgeBaseUploadRequest(1L, Document.SourceType.TEXT, null, "t", "c", null, null)));
+        assertEquals(ErrorCode.FORBIDDEN, ex.getErrorCode(), "非创建者且非管理员应被拒");
+        verify(documentRepository, never()).save(any(Document.class));
     }
 
     @Test
-    void testUploadDocument_asyncIndexing_savesChunksOnAnotherThread() throws Exception {
+    void uploadDocument_adminCanUploadAnyKb() {
+        loginAs("admin", "ADMIN");
+        KnowledgeBase owned = new KnowledgeBase();
+        owned.setId(1L);
+        owned.setCreatorId("other");
+        when(kbRepository.findById(1L)).thenReturn(Optional.of(owned));
+        when(indexingJobService.findReadyDuplicate(eq(1L), any())).thenReturn(Optional.empty());
+        when(documentRepository.save(any(Document.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(indexingJobRepository.save(any(IndexingJob.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        String docId = knowledgeService.uploadDocument(
+                new KnowledgeBaseUploadRequest(1L, Document.SourceType.TEXT, null, "t", "c", null, null));
+        assertEquals(36, docId.length());
+        verify(indexingJobService).submit(any());
+    }
+
+    @Test
+    void uploadDocument_dedupReturnsExistingId_withoutSaving() {
         KnowledgeBase kb = new KnowledgeBase();
         kb.setId(1L);
         when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        when(documentRepository.findByDocumentId(any())).thenReturn(Optional.of(new Document()));
-        when(embeddingService.splitIntoChunks(any())).thenReturn(List.of("s1", "s2"));
-        when(embeddingService.embedSlices(any())).thenReturn(List.of(new float[1024], new float[1024]));
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(
-                List.of(grant(1L, KbAccessTargetType.USER, "tester"))); // 模拟创建者授权已入库
+        when(indexingJobService.findReadyDuplicate(eq(1L), any())).thenReturn(Optional.of("existing-doc-id"));
 
-        CountDownLatch done = new CountDownLatch(1);
-        Executor latchExecutor = r -> new Thread(r).start();
-        knowledgeService = new KnowledgeService(kbRepository, documentRepository, documentChunkRepository,
-                embeddingService, latchExecutor, retrievalPort, kbAccessRepository);
-        knowledgeService.uploadDocument(new KnowledgeBaseUploadRequest(1L, Document.SourceType.TEXT, null, "t", "c", null));
-        done.await(2, TimeUnit.SECONDS);
-
-        verify(documentChunkRepository, times(2)).saveChunk(any(), any(), anyInt(), any(), any());
+        String docId = knowledgeService.uploadDocument(
+                new KnowledgeBaseUploadRequest(1L, Document.SourceType.TEXT, null, "t", "c", null, null));
+        assertEquals("existing-doc-id", docId, "R8 去重应秒回已有 id");
+        verify(documentRepository, never()).save(any(Document.class));
+        verify(indexingJobService, never()).submit(any());
     }
 
-    // ===== 检索链路（T4 + RBAC）=====
+    @Test
+    void uploadDocument_kbNotFound_throwsKnowledgeBaseNotFound() {
+        when(kbRepository.findById(99L)).thenReturn(Optional.empty());
+
+        BizException ex = assertThrows(BizException.class, () ->
+                knowledgeService.uploadDocument(new KnowledgeBaseUploadRequest(99L, Document.SourceType.TEXT, null, "t", "c", null, null)));
+        assertEquals(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, ex.getErrorCode());
+    }
+
+    // ===== 检索链路（K7 创建者/管理员鉴权）=====
 
     @Test
-    void testRetrieve_queryEmpty_returnsEmptyList() {
+    void retrieve_emptyQuery_returnsEmptyList() {
         List<ChunkVO> r = knowledgeService.retrieve(1L, "   ", 5);
         assertEquals(0, r.size());
     }
 
     @Test
-    void testRetrieve_creatorCanAccess_passesThresholdToRetrievalPort() {
+    void retrieve_creatorCanAccess_passesToRetrievalPort() {
         KnowledgeBase kb = new KnowledgeBase();
         kb.setId(1L);
         kb.setCreatorId("tester");
         when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(
-                List.of(grant(1L, KbAccessTargetType.USER, "tester"))); // 创建者授权存在
         when(embeddingService.embedDocuments(any())).thenReturn(List.of(new float[]{0.1f, 0.2f}));
         when(retrievalPort.retrieve(any(float[].class), any(), anyInt(), anyDouble()))
                 .thenReturn(List.of(new RetrievalPort.RetrievedChunk("d1", 0, "c1", 0.9)));
@@ -191,24 +179,23 @@ class KnowledgeServiceTest {
 
         assertEquals(1, result.size());
         assertEquals(0.9, result.get(0).score());
-        verify(retrievalPort).retrieve(any(float[].class), eq(1L), eq(5), anyDouble());
+        verify(retrievalPort).retrieve(any(float[].class), anyList(), eq(5), anyDouble());
     }
 
     @Test
-    void testRetrieve_noGrant_throwsForbidden() {
+    void retrieve_nonCreatorNonAdmin_throwsForbidden() {
         KnowledgeBase kb = new KnowledgeBase();
         kb.setId(1L);
         kb.setCreatorId("other");
         when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(List.of()); // 无授权
 
         BizException ex = assertThrows(BizException.class, () -> knowledgeService.retrieve(1L, "问题", 5));
-        assertEquals(ErrorCode.FORBIDDEN, ex.getErrorCode(), "无授权应被拒");
+        assertEquals(ErrorCode.FORBIDDEN, ex.getErrorCode(), "非创建者且非管理员应被拒");
         verify(retrievalPort, never()).retrieve(any(float[].class), any(), anyInt(), anyDouble());
     }
 
     @Test
-    void testRetrieve_adminCanAccessAnyKb() {
+    void retrieve_adminCanAccessAnyKb() {
         loginAs("admin", "ADMIN");
         KnowledgeBase kb = new KnowledgeBase();
         kb.setId(1L);
@@ -220,45 +207,11 @@ class KnowledgeServiceTest {
 
         List<ChunkVO> result = knowledgeService.retrieve(1L, "问题", 5);
         assertEquals(1, result.size());
-        verify(retrievalPort).retrieve(any(float[].class), eq(1L), eq(5), anyDouble());
+        verify(retrievalPort).retrieve(any(float[].class), anyList(), eq(5), anyDouble());
     }
 
     @Test
-    void testRetrieve_roleGrant_allowsUserWithRole() {
-        loginAs("tester", "USER");
-        KnowledgeBase kb = new KnowledgeBase();
-        kb.setId(1L);
-        kb.setCreatorId("other");
-        when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(
-                List.of(grant(1L, KbAccessTargetType.ROLE, "USER"))); // 按角色 USER 授权
-        when(embeddingService.embedDocuments(any())).thenReturn(List.of(new float[]{0.1f, 0.2f}));
-        when(retrievalPort.retrieve(any(float[].class), any(), anyInt(), anyDouble()))
-                .thenReturn(List.of(new RetrievalPort.RetrievedChunk("d1", 0, "c1", 0.9)));
-
-        List<ChunkVO> result = knowledgeService.retrieve(1L, "问题", 5);
-        assertEquals(1, result.size());
-    }
-
-    @Test
-    void testRetrieve_userGrant_allowsSpecificUser() {
-        loginAs("tester");
-        KnowledgeBase kb = new KnowledgeBase();
-        kb.setId(1L);
-        kb.setCreatorId("other");
-        when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(
-                List.of(grant(1L, KbAccessTargetType.USER, "tester"))); // 按具体人授权
-        when(embeddingService.embedDocuments(any())).thenReturn(List.of(new float[]{0.1f, 0.2f}));
-        when(retrievalPort.retrieve(any(float[].class), any(), anyInt(), anyDouble()))
-                .thenReturn(List.of(new RetrievalPort.RetrievedChunk("d1", 0, "c1", 0.9)));
-
-        List<ChunkVO> result = knowledgeService.retrieve(1L, "问题", 5);
-        assertEquals(1, result.size());
-    }
-
-    @Test
-    void testRetrieve_kbNotFound_throwsKnowledgeBaseNotFound() {
+    void retrieve_kbNotFound_throwsKnowledgeBaseNotFound() {
         when(kbRepository.findById(7L)).thenReturn(Optional.empty());
 
         BizException ex = assertThrows(BizException.class, () -> knowledgeService.retrieve(7L, "问题", 5));
@@ -268,7 +221,7 @@ class KnowledgeServiceTest {
     // ===== 状态/视图（T3/T5）=====
 
     @Test
-    void testGetDocumentStatus_indexed_returnsDone() {
+    void getDocumentStatus_indexed_returnsDone() {
         Document doc = new Document();
         doc.setStatus(Document.DocumentStatus.INDEXED);
         when(documentRepository.findByDocumentId("d1")).thenReturn(Optional.of(doc));
@@ -277,7 +230,7 @@ class KnowledgeServiceTest {
     }
 
     @Test
-    void testGetDocumentVO_indexed_returnsVoWithStatusAndChunkCount() {
+    void getDocumentVO_indexed_returnsVoWithStatusAndChunkCount() {
         Document doc = new Document();
         doc.setStatus(Document.DocumentStatus.INDEXED);
         doc.setChunkCount(3);
@@ -286,74 +239,5 @@ class KnowledgeServiceTest {
         DocumentVO vo = knowledgeService.getDocumentVO("d1");
         assertEquals("INDEXED", vo.status());
         assertEquals(3, vo.chunkCount());
-    }
-
-    // ===== 访问授权管理（仅 ADMIN，RBAC）=====
-
-    @Test
-    void testGrantAccess_adminCreatesGrant() {
-        loginAs("admin", "ADMIN");
-        KnowledgeBase kb = new KnowledgeBase();
-        kb.setId(1L);
-        when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        when(kbAccessRepository.existsByKbIdAndTargetTypeAndTargetId(1L, KbAccessTargetType.ROLE, "USER"))
-                .thenReturn(false);
-        when(kbAccessRepository.save(any(KbAccess.class))).thenAnswer(inv -> {
-            KbAccess g = inv.getArgument(0);
-            g.setId(99L); // 模拟 JPA 回填主键
-            return g;
-        });
-
-        var vo = knowledgeService.grantAccess(1L, KbAccessTargetType.ROLE, "USER");
-
-        assertEquals("USER", vo.getTargetId());
-        verify(kbAccessRepository).save(any(KbAccess.class));
-    }
-
-    @Test
-    void testGrantAccess_nonAdmin_throwsForbidden() {
-        loginAs("tester"); // 非管理员
-
-        BizException ex = assertThrows(BizException.class,
-                () -> knowledgeService.grantAccess(1L, KbAccessTargetType.ROLE, "USER"));
-        assertEquals(ErrorCode.FORBIDDEN, ex.getErrorCode(), "非管理员不可分配授权");
-    }
-
-    @Test
-    void testRevokeAccess_adminDeletes() {
-        loginAs("admin", "ADMIN");
-        KbAccess grant = grant(1L, KbAccessTargetType.USER, "tester");
-        grant.setId(5L);
-        when(kbAccessRepository.findByKbIdAndId(1L, 5L)).thenReturn(Optional.of(grant));
-
-        knowledgeService.revokeAccess(1L, 5L);
-
-        verify(kbAccessRepository).delete(grant);
-    }
-
-    @Test
-    void testListAccess_adminReturnsGrants() {
-        loginAs("admin", "ADMIN");
-        KnowledgeBase kb = new KnowledgeBase();
-        kb.setId(1L);
-        when(kbRepository.findById(1L)).thenReturn(Optional.of(kb));
-        KbAccess g1 = grant(1L, KbAccessTargetType.USER, "tester");
-        g1.setId(1L);
-        KbAccess g2 = grant(1L, KbAccessTargetType.ROLE, "USER");
-        g2.setId(2L);
-        when(kbAccessRepository.findByKbId(1L)).thenReturn(List.of(g1, g2));
-
-        var list = knowledgeService.listAccess(1L);
-        assertEquals(2, list.size());
-    }
-
-    // ===== 工具 =====
-
-    private KbAccess grant(Long kbId, KbAccessTargetType type, String targetId) {
-        KbAccess g = new KbAccess();
-        g.setKbId(kbId);
-        g.setTargetType(type);
-        g.setTargetId(targetId);
-        return g;
     }
 }

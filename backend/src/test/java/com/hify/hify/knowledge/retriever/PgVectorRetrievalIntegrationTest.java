@@ -81,7 +81,7 @@ class PgVectorRetrievalIntegrationTest {
         insert(TEST_KB, "docE", 2, vec(1.0f, 0.5f), "E");    // 相似度 ~0.91
         insert(TEST_KB, "docD", 3, vec(0.0f, 0.01f), "D");   // 相似度 ~0.30
 
-        List<RetrievedChunk> hits = retrievalPort.retrieve(q, TEST_KB, 10, 0.0);
+        List<RetrievedChunk> hits = retrievalPort.retrieve(q, List.of("docA", "docE", "docD"), 10, 0.0);
 
         assertEquals(3, hits.size());
         assertEquals("A", hits.get(0).content());
@@ -97,7 +97,7 @@ class PgVectorRetrievalIntegrationTest {
         insert(TEST_KB, "docA", 1, vec(1.0f, 0.01f), "A");
         insert(OTHER_KB, "docC", 1, vec(1.0f, 0.01f), "C");  // 向量与查询一致，但属另一个 kb
 
-        List<RetrievedChunk> hits = retrievalPort.retrieve(q, TEST_KB, 10, 0.0);
+        List<RetrievedChunk> hits = retrievalPort.retrieve(q, List.of("docA"), 10, 0.0);
 
         assertEquals(1, hits.size());
         assertEquals("A", hits.get(0).content());
@@ -110,7 +110,7 @@ class PgVectorRetrievalIntegrationTest {
         insert(TEST_KB, "docE", 2, vec(1.0f, 0.5f), "E");
         insert(TEST_KB, "docD", 3, vec(0.0f, 0.01f), "D");   // ~0.30 < 0.6
 
-        List<RetrievedChunk> hits = retrievalPort.retrieve(q, TEST_KB, 10, 0.6);
+        List<RetrievedChunk> hits = retrievalPort.retrieve(q, List.of("docA", "docE", "docD"), 10, 0.6);
 
         assertEquals(2, hits.size());
         assertEquals("A", hits.get(0).content());
@@ -123,7 +123,7 @@ class PgVectorRetrievalIntegrationTest {
         insert(TEST_KB, "docA", 1, vec(1.0f, 0.01f), "A");
         insert(TEST_KB, "docE", 2, vec(1.0f, 0.5f), "E");
 
-        List<RetrievedChunk> hits = retrievalPort.retrieve(q, TEST_KB, 1, 0.0);
+        List<RetrievedChunk> hits = retrievalPort.retrieve(q, List.of("docA", "docE"), 1, 0.0);
 
         assertEquals(1, hits.size());
         assertEquals("A", hits.get(0).content());

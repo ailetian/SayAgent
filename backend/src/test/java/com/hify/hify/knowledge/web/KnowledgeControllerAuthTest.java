@@ -3,8 +3,14 @@ package com.hify.hify.knowledge.web;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hify.hify.common.security.JwtUtil;
 import com.hify.hify.common.security.SecurityConfig;
+import com.hify.hify.knowledge.service.KbAdminService;
 import com.hify.hify.knowledge.service.KnowledgeService;
+import com.hify.hify.knowledge.service.MountService;
 import com.hify.hify.knowledge.web.DocumentVO;
+import com.hify.hify.knowledge.web.KnowledgeBaseCreateRequest;
+import com.hify.hify.knowledge.service.IndexingJobService;
+import com.hify.hify.knowledge.service.KbQaService;
+import com.hify.hify.knowledge.web.KnowledgeBaseVO;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,6 +66,14 @@ class KnowledgeControllerAuthTest {
     @MockBean
     private KnowledgeService knowledgeService;
     @MockBean
+    private KbAdminService kbAdminService;
+    @MockBean
+    private MountService mountService;
+    @MockBean
+    private KbQaService kbQaService;
+    @MockBean
+    private IndexingJobService indexingJobService;
+    @MockBean
     private PasswordEncoder passwordEncoder;
 
     @Test
@@ -100,5 +114,31 @@ class KnowledgeControllerAuthTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data").isArray());
+    }
+
+    @Test
+    void testController_noLogin_createBase_returns401() throws Exception {
+        mockMvc.perform(post("/api/knowledge/bases")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"kb\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void testController_withValidToken_createBase_returnsVO() throws Exception {
+        String token = jwtUtil.sign("tester", "USER");
+        when(kbAdminService.createBase(any())).thenReturn(
+                new KnowledgeBaseVO(1L, "kb", "", null, 1024, null, "tester",
+                        com.hify.hify.knowledge.entity.KnowledgeBase.ChunkStrategy.AUTO,
+                        "zh-CN", com.hify.hify.knowledge.entity.KnowledgeBase.Status.ACTIVE, true, null));
+
+        mockMvc.perform(post("/api/knowledge/bases")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "kb"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(1))
+                .andExpect(jsonPath("$.data.name").value("kb"));
     }
 }
