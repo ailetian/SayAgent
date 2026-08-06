@@ -9,11 +9,12 @@
  * @param {object} [handlers]
  * @param {(chunk:string)=>void} [handlers.onToken] 收到 token 增量（逐字流式）
  * @param {(ev:object)=>void} [handlers.onMeta] 收到 meta 帧（含 conversationId 等）
+ * @param {(ev:object)=>void} [handlers.onStep] 收到 step 帧（进度：检索知识库 / 调用 MCP 工具）
  * @param {(ev:object)=>void} [handlers.onDone] 收到 done 帧
  * @param {(message:string)=>void} [handlers.onError] 收到 error 帧
  */
 export async function parseSSE(readableStream, handlers = {}) {
-  const { onToken, onMeta, onDone, onError } = handlers
+  const { onToken, onMeta, onStep, onDone, onError } = handlers
   const reader = readableStream.getReader()
   const decoder = new TextDecoder()
   let buf = ''
@@ -41,6 +42,7 @@ export async function parseSSE(readableStream, handlers = {}) {
         if (!ev || typeof ev !== 'object') continue
         if (ev.event === 'meta') onMeta && onMeta(ev)
         else if (ev.event === 'token') onToken && onToken(ev.content || '')
+        else if (ev.event === 'step') onStep && onStep(ev)
         else if (ev.event === 'done') { onDone && onDone(ev); terminal = true; break }
         else if (ev.event === 'error') { onError && onError(ev.message || '未知错误'); terminal = true; break }
       }

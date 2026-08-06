@@ -75,6 +75,8 @@
             :key="m.id != null ? m.id : 'm' + i"
             :role="m.role"
             :content="m.content"
+            :steps="m.steps"
+            :streaming="chat.streaming && i === chat.messages.length - 1"
           />
 
           <div v-if="!chat.messages.length" class="muted chat-empty">选择 Agent 并开始对话。</div>

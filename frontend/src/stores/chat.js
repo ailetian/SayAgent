@@ -121,7 +121,7 @@ export const useChatStore = defineStore('chat', () => {
     if (streaming.value || !text || !text.trim() || !agentId.value) return
     const content = text.trim()
     messages.value.push({ role: 'user', content })
-    messages.value.push({ role: 'assistant', content: '' })
+    messages.value.push({ role: 'assistant', content: '', steps: [] })
     // ⚠️ Vue3 响应式陷阱：必须经由「响应式数组元素」(messages.value[idx]) 修改才能触发重渲染；
     // 若持有原始对象 ai 直接改 ai.content，会绕过代理 setter，导致流式 token 不刷新（气泡永久空白）。
     const aiIndex = messages.value.length - 1
@@ -135,6 +135,28 @@ export const useChatStore = defineStore('chat', () => {
           signal: aborter.signal,
           onToken: (chunk) => {
             messages.value[aiIndex].content += chunk
+            streamTick.value++
+          },
+          onStep: (ev) => {
+            const steps = messages.value[aiIndex].steps
+            const label = ev.content || ''
+            const status = ev.stepStatus || 'done'
+            const kind = ev.kind || ''
+            if (status === 'running') {
+              steps.push({ kind, label, status: 'running' })
+            } else {
+              // 把同 kind 最近一条 running 标记为 done（更新文案）；找不到则追加
+              let hit = -1
+              for (let i = steps.length - 1; i >= 0; i--) {
+                if (steps[i].kind === kind && steps[i].status === 'running') { hit = i; break }
+              }
+              if (hit >= 0) {
+                steps[hit].status = 'done'
+                if (label) steps[hit].label = label
+              } else {
+                steps.push({ kind, label, status: 'done' })
+              }
+            }
             streamTick.value++
           },
           onMeta: (ev) => {

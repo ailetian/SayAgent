@@ -23,8 +23,14 @@ const routes = [
   {
     path: '/knowledge',
     name: 'knowledge',
-    component: () => import('../views/Knowledge.vue'),
+    component: () => import('../views/KnowledgeList.vue'),
     meta: { requiresAuth: true, layout: 'default', title: '知识库' }
+  },
+  {
+    path: '/knowledge/:kbId',
+    name: 'knowledge-detail',
+    component: () => import('../views/KnowledgeDetail.vue'),
+    meta: { requiresAuth: true, layout: 'default', title: '知识库详情' }
   },
   {
     path: '/models',

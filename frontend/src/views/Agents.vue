@@ -82,8 +82,11 @@
           <div class="field"><input v-model.number="form.maxContextTokens" type="number" min="1" /></div>
         </div>
         <div class="span-2">
-          <label class="form-label">知识库引用（逗号分隔的 ID）</label>
-          <div class="field"><input v-model="knowledgeRaw" placeholder="如：1, 2, 3" /></div>
+          <label class="form-label">知识库引用（可多选）</label>
+          <el-select v-model="form.knowledgeRefs" multiple filterable placeholder="选择该 Agent 可检索的知识库" style="width:100%">
+            <el-option v-for="kb in knowledgeBases" :key="kb.id" :label="`${kb.name} (#${kb.id})`" :value="kb.id" />
+          </el-select>
+          <div class="muted" style="font-size:12px;margin-top:6px" v-if="!knowledgeBases.length">暂无知识库，请先在「知识库」页创建。</div>
         </div>
         <div class="span-2">
           <label class="form-label">工具引用（MCP Server）</label>
@@ -115,14 +118,15 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { listAgents, createAgent, updateAgent, deleteAgent } from '../api/agent'
 import { listModels } from '../api/model'
 import { listMcpServers } from '../api/mcp'
+import { listBases } from '../api/knowledge'
 
 const agents = ref([])
 const models = ref([])
 const mcpServers = ref([])
+const knowledgeBases = ref([])
 const dialog = ref(false)
 const editing = ref(null)
 const saving = ref(false)
-const knowledgeRaw = ref('')
 
 const empty = () => ({
   name: '', description: '', modelProviderId: null, systemPrompt: '',
@@ -132,15 +136,6 @@ const empty = () => ({
 })
 const form = ref(empty())
 
-function parseIds(raw) {
-  return (raw || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => Number(s))
-    .filter((n) => !Number.isNaN(n))
-}
-
 function modelLabel(id) {
   const m = models.value.find((x) => x.id === id)
   if (!m) return id != null ? `#${id}` : '未绑定'
@@ -148,10 +143,13 @@ function modelLabel(id) {
 }
 
 async function load() {
-  const [a, m, ms] = await Promise.all([listAgents(), listModels(), listMcpServers()])
+  const [a, m, ms, kb] = await Promise.all([
+    listAgents(), listModels(), listMcpServers(), listBases()
+  ])
   agents.value = a
   models.value = m
   mcpServers.value = ms
+  knowledgeBases.value = (kb && kb.items) || []
 }
 
 function toForm(a) {
@@ -167,14 +165,12 @@ function toForm(a) {
 function openCreate() {
   editing.value = null
   form.value = empty()
-  knowledgeRaw.value = ''
   dialog.value = true
 }
 
 function openEdit(a) {
   editing.value = a.id
   form.value = toForm(a)
-  knowledgeRaw.value = (a.knowledgeRefs || []).join(', ')
   dialog.value = true
 }
 
@@ -187,7 +183,7 @@ async function save() {
   try {
     const payload = {
       ...form.value,
-      knowledgeRefs: parseIds(knowledgeRaw.value),
+      knowledgeRefs: form.value.knowledgeRefs || [],
       toolRefs: form.value.toolRefs || []
     }
     if (editing.value == null) await createAgent(payload)

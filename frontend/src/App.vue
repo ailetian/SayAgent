@@ -59,7 +59,7 @@ const auth = useAuthStore()
 // isLoggedIn 变 false 会把壳瞬间卸掉（"刷新能看到、一闪就没"的根因）。
 // 登录校验交给 router 守卫处理（未登录访问受保护页会跳 /login），与壳渲染解耦。
 const showChrome = computed(() => route.name !== 'login')
-const activeMenu = computed(() => route.path)
+const activeMenu = computed(() => '/' + (route.path.split('/')[1] || ''))
 const currentTitle = computed(() => route.meta.title || 'Hify')
 const initial = computed(() => (auth.user?.username || '?').charAt(0).toUpperCase())
 
