@@ -2,15 +2,28 @@
   <div class="msg" :class="roleClass">
     <div class="msg-role">{{ isUser ? '你' : 'AI' }}</div>
     <div class="msg-bubble glass">
-      <!-- 进度步骤（检索知识库 / 调用 MCP 工具），仅 AI 且存在 steps 时展示 -->
-      <div v-if="!isUser && steps.length" class="steps">
-        <div v-for="(s, i) in steps" :key="i" class="step" :class="s.status">
-          <span class="step-ico">
-            <span v-if="s.status === 'running'" class="spin" />
-            <span v-else>✓</span>
-          </span>
-          <span class="step-label">{{ s.label }}</span>
+      <!-- 调用轨迹：流式进行中显示实时进度；结束后折叠为可回看的轨迹（对话日志铁律：KB/MCP 记录不得删） -->
+      <div v-if="!isUser && steps.length" class="trace-wrap">
+        <div v-if="streaming" class="steps">
+          <div v-for="(s, i) in steps" :key="i" class="step" :class="s.status">
+            <span class="step-ico">
+              <span v-if="s.status === 'running'" class="spin" />
+              <span v-else>✓</span>
+            </span>
+            <span class="step-label">{{ s.label }}</span>
+          </div>
         </div>
+        <details v-else class="trace">
+          <summary>调用轨迹（{{ steps.length }} 条）</summary>
+          <div v-for="(s, i) in steps" :key="i" class="trace-item" :class="s.kind">
+            <div class="trace-head">
+              <span class="tag">{{ s.kind === 'retrieval' ? '知识库' : 'MCP' }}</span>
+              <span class="step-ico">✓</span>
+              <span class="trace-title">{{ s.label }}</span>
+            </div>
+            <div v-if="traceDetail(s)" class="trace-detail">{{ traceDetail(s) }}</div>
+          </div>
+        </details>
       </div>
       <!-- 流式生成中：用纯文本（保留换行）即时渲染，保证逐字可见，避免半成品 markdown 阻塞显示；
            生成结束（streaming=false）后切回 MarkdownView 做最终排版。 -->
@@ -41,6 +54,27 @@ const isUser = computed(() => {
   return r === 'user' || r === 'human'
 })
 const roleClass = computed(() => (isUser.value ? 'user' : 'assistant'))
+
+// 调用轨迹展开后的明细文案：知识库展示来源/相似度/片段；MCP 展示工具/入参/返回/状态。
+function traceDetail(s) {
+  if (!s) return ''
+  if (s.kind === 'retrieval') {
+    const parts = []
+    if (s.docId) parts.push('来源文档：' + s.docId)
+    if (s.score != null) parts.push('相似度：' + s.score)
+    if (s.result) parts.push('片段：' + s.result)
+    return parts.join('　·　')
+  }
+  if (s.kind === 'tool') {
+    const parts = []
+    if (s.toolName) parts.push('工具：' + s.toolName)
+    if (s.args) parts.push('入参：' + s.args)
+    if (s.result) parts.push('返回：' + s.result)
+    if (s.success === false) parts.push('状态：不可用 / 失败')
+    return parts.join('　·　')
+  }
+  return ''
+}
 </script>
 
 <style scoped>
@@ -80,4 +114,37 @@ const roleClass = computed(() => (isUser.value ? 'user' : 'assistant'))
   animation: spin .7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* 调用轨迹（结束后折叠回看） */
+.trace {
+  margin-bottom: 10px; padding: 8px 10px;
+  background: rgba(94, 234, 212, .06);
+  border: 1px solid rgba(94, 234, 212, .18);
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+.trace > summary {
+  cursor: pointer; color: #5EEAD4; opacity: .9;
+  user-select: none; list-style: none; padding: 2px 0;
+}
+.trace > summary::-webkit-details-marker { display: none; }
+.trace > summary::before { content: '▸ '; }
+.trace[open] > summary::before { content: '▾ '; }
+.trace-item { margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(94, 234, 212, .15); }
+.trace-item:first-of-type { border-top: none; margin-top: 6px; padding-top: 0; }
+.trace-head { display: flex; align-items: center; gap: 8px; }
+.trace-item .step-ico { color: #5EEAD4; font-weight: 700; }
+.trace-title { color: var(--text); opacity: .9; }
+.tag {
+  font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  background: rgba(94, 234, 212, .14); color: #5EEAD4;
+  border: 1px solid rgba(94, 234, 212, .3);
+}
+.trace-item.tool .tag { background: rgba(255, 180, 84, .14); color: #FFB454; border-color: rgba(255, 180, 84, .3); }
+.trace-detail {
+  margin-top: 5px; padding-left: 22px;
+  color: var(--muted); line-height: 1.55; word-break: break-word;
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
 </style>
