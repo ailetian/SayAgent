@@ -2,6 +2,7 @@ package com.hify.hify.modelprovider.route;
 
 import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
+import com.hify.hify.common.tool.ToolDefinition;
 import com.hify.hify.modelprovider.client.ChatMessage;
 import com.hify.hify.modelprovider.client.LlmResponse;
 import com.hify.hify.modelprovider.client.ProviderClient;
@@ -21,6 +22,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -99,6 +101,51 @@ public class ProviderRouter {
         }
         ProviderConfig config = toConfig(provider);
         return client.stream(messages, config, usage);
+    }
+
+    /**
+     * 带工具列表的非流式对话（M8/T3 函数调用）：按 preferredProviderId 选厂商后直连其 client.send(带工具)，
+     * 让模型有机会回 tool_calls。复用 resolveProvider + clientMap（§4.5 选主）。
+     *
+     * @param messages        对话上下文
+     * @param preferredProviderId Agent 绑定的厂商 id（为空/不可用回退默认）
+     * @param toolDefs        工具名片列表（common.tool.ToolDefinition，供模型选工具）
+     * @return 非流式响应（可能含 toolCalls）
+     */
+    public LlmResponse routeWithTools(List<ChatMessage> messages, Long preferredProviderId,
+                                      List<ToolDefinition> toolDefs) {
+        ModelProvider provider = resolveProvider(preferredProviderId);
+        ProviderClient client = clientMap.get(provider.getProviderType());
+        if (client == null) {
+            throw new BizException(ErrorCode.MODEL_NOT_FOUND,
+                    "未注册对话客户端 providerType=" + provider.getProviderType());
+        }
+        ProviderConfig config = toConfig(provider);
+        ProviderClient decorated = decorator.decorate(client, provider.getProviderType());
+        return decorated.send(messages, config, toolDefs);
+    }
+
+    /**
+     * 带工具列表的流式对话（M8/T3 修复流式回归）：按 preferredProviderId 选厂商后直连其 client.sendStreamWithTools，
+     * 让模型在生成过程中每吐一个字就经 {@code tokenSink} 回传前端（真正逐字流式），同时把工具调用意图合并回传，
+     * 供上层编排循环判断 finish_reason / 是否还要调工具。不做熔断包裹（与 {@link #stream} 一致，流式超时由连接/读超时控制）。
+     *
+     * @param messages           对话上下文
+     * @param preferredProviderId Agent 绑定的厂商 id（为空/不可用回退默认）
+     * @param toolDefs           工具名片列表（common.tool.ToolDefinition，供模型选工具）
+     * @param tokenSink          内容增量消费者（实时推前端用）
+     * @return 完整响应（含可能的 toolCalls 与本轮 token 用量）
+     */
+    public LlmResponse routeWithToolsStream(List<ChatMessage> messages, Long preferredProviderId,
+                                            List<ToolDefinition> toolDefs, Consumer<String> tokenSink) {
+        ModelProvider provider = resolveProvider(preferredProviderId);
+        ProviderClient client = clientMap.get(provider.getProviderType());
+        if (client == null) {
+            throw new BizException(ErrorCode.MODEL_NOT_FOUND,
+                    "未注册对话客户端 providerType=" + provider.getProviderType());
+        }
+        ProviderConfig config = toConfig(provider);
+        return client.sendStreamWithTools(messages, config, toolDefs, tokenSink);
     }
 
     /** 解析流式目标厂商：优先用 preferredProviderId（须 enabled），否则用默认厂商（§4.5）。 */

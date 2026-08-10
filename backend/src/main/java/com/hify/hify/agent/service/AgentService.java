@@ -8,6 +8,7 @@ import com.hify.hify.agent.repository.AgentRepository;
 import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
 import com.hify.hify.modelprovider.service.ModelService;
+import com.hify.hify.skill.service.SkillService;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -39,6 +40,9 @@ public class AgentService {
 
     /** 跨模块依赖：modelprovider 发布的「模型管理」API（仅此一处依赖，不触碰其内部实体/仓储）。 */
     private final ModelService modelService;
+
+    /** 跨模块依赖：skill 发布的「技能管理」API（仅依赖 Service，不触碰 skill 内部 entity/repository，§3.2）。 */
+    private final SkillService skillService;
 
     /** 列出全部 Agent（软删除已由 @SQLRestriction 过滤）。 */
     public List<AgentVO> listAgents() {
@@ -75,6 +79,11 @@ public class AgentService {
         a.setMaxContextTokens(req.maxContextTokens() != null ? req.maxContextTokens() : 8192);
         a.setKnowledgeRefs(req.knowledgeRefs() != null ? req.knowledgeRefs() : new ArrayList<>());
         a.setToolRefs(req.toolRefs() != null ? req.toolRefs() : new ArrayList<>());
+        List<Long> skillRefs = req.skillRefs() != null ? req.skillRefs() : new ArrayList<>();
+        for (Long sid : skillRefs) {
+            skillService.assertExists(sid);          // 挂载的技能须存在且启用（§3.2）
+        }
+        a.setSkillRefs(skillRefs);
         boolean isDefault = req.defaultAgent() != null ? req.defaultAgent() : false;
         if (isDefault) {
             clearOldDefaultAndSetNew(a);
@@ -134,6 +143,12 @@ public class AgentService {
         }
         if (req.toolRefs() != null) {
             a.setToolRefs(req.toolRefs());
+        }
+        if (req.skillRefs() != null) {
+            for (Long sid : req.skillRefs()) {
+                skillService.assertExists(sid);      // 挂载的技能须存在且启用（§3.2）
+            }
+            a.setSkillRefs(req.skillRefs());
         }
         if (req.defaultAgent() != null && req.defaultAgent()
                 && !Boolean.TRUE.equals(a.getDefaultAgent())) {
@@ -213,5 +228,42 @@ public class AgentService {
             return null;
         }
         return auth.getName();
+    }
+
+    /**
+     * 找出所有挂载了某知识库的 Agent（删除知识库前的挂载校验，K0808）。
+     *
+     * <p>大白话：{@code knowledge_refs} 是 JSON 列，没有可靠派生查询，这里把全量 Agent 捞出来在内存里筛
+     * （内部 20–50 人规模 Agent 极少，性能可忽略）。返回它们的 VO（天然屏蔽秘钥，§7.11）。
+     */
+    public List<AgentVO> findAgentsByKnowledgeRef(Long kbId) {
+        return repository.findAll().stream()
+                .filter(a -> a.getKnowledgeRefs() != null && a.getKnowledgeRefs().contains(kbId))
+                .map(AgentVO::from)
+                .toList();
+    }
+
+    /**
+     * 把某知识库从所有 Agent 的 knowledgeRefs 里摘除并落库（删除知识库时同步清理挂载字段，双源一致，K0808）。
+     */
+    public void removeKnowledgeRefEverywhere(Long kbId) {
+        List<Agent> affected = repository.findAll().stream()
+                .filter(a -> a.getKnowledgeRefs() != null && a.getKnowledgeRefs().contains(kbId))
+                .toList();
+        for (Agent a : affected) {
+            a.getKnowledgeRefs().remove(kbId);
+            repository.save(a);
+        }
+    }
+
+    /**
+     * 把某知识库从指定 Agent 的 knowledgeRefs 里摘除并落库（卸载挂载时同步清理，消除字段与链接表双源脱钩，K0808）。
+     */
+    public void removeKnowledgeRefFromAgent(Long agentId, Long kbId) {
+        Agent a = repository.findById(agentId)
+                .orElseThrow(() -> new BizException(ErrorCode.AGENT_NOT_FOUND, "id=" + agentId));
+        if (a.getKnowledgeRefs() != null && a.getKnowledgeRefs().remove(kbId)) {
+            repository.save(a);
+        }
     }
 }

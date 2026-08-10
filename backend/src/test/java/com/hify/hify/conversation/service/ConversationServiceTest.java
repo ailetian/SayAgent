@@ -14,7 +14,8 @@ import com.hify.hify.conversation.repository.MessageRepository;
 import com.hify.hify.knowledge.entity.Document;
 import com.hify.hify.knowledge.repository.DocumentRepository;
 import com.hify.hify.knowledge.retriever.RetrievalPort;
-import com.hify.hify.mcp.McpService;
+import com.hify.hify.conversation.tool.ToolLoopRunner;
+import com.hify.hify.conversation.tool.ToolRegistry;
 import com.hify.hify.modelprovider.client.ChatMessage;
 import com.hify.hify.modelprovider.domain.enums.ProviderType;
 import com.hify.hify.modelprovider.dto.ModelProviderVO;
@@ -88,7 +89,9 @@ class ConversationServiceTest {
     @Mock
     private ConversationLogAsyncWriter conversationLogAsyncWriter;
     @Mock
-    private McpService mcpService;
+    private ToolRegistry toolRegistry;
+    @Mock
+    private ToolLoopRunner toolLoopRunner;
 
     private ConversationService svc;
     private ConversationService spySvc;
@@ -105,8 +108,13 @@ class ConversationServiceTest {
 
         svc = new ConversationService(conversationRepository, messageRepository, userService,
                 sseExecutor, agentService, modelService, llmStreamService, retrievalPort,
-                documentRepository, conversationLogAsyncWriter, mcpService);
+                documentRepository, conversationLogAsyncWriter, toolRegistry, toolLoopRunner);
         spySvc = spy(svc);
+        // M8/T3：工具循环默认无工具、直接回显 seedMessages（把编排循环与知识/流式断言解耦，
+        // 让既有 SSE/知识注入用例不受函数调用改造影响）
+        lenient().when(toolRegistry.resolve(any())).thenReturn(List.of());
+        lenient().when(toolLoopRunner.run(any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> new ToolLoopRunner.LoopResult("", inv.getArgument(3)));
         // 拦截 send(...) 记录 SSE 事件，不真正写响应
         doAnswer(inv -> {
             events.add(inv.getArgument(1));
@@ -181,13 +189,16 @@ class ConversationServiceTest {
         spySvc.orchestrate(emitter, new ChatRequest("conv-1", "hi", "1"), 1L, conv(1L, "conv-1"), 1L, 99L,
                 new AtomicReference<>());
 
-        // 事件顺序：meta → token(Hello) → token( world) → done
-        assertEquals(4, events.size());
-        assertEquals("meta", events.get(0).event());
-        assertEquals("token", events.get(1).event());
-        assertEquals("Hello", events.get(1).content());
-        assertEquals(" world", events.get(2).content());
-        assertEquals("done", events.get(3).event());
+        // 事件顺序：retrieval-step(running) → retrieval-step(done) → meta → token(Hello) → token( world) → done
+        // （prepare 阶段先发知识库检索进度 step，再发 meta；与 T3 工具循环 step 通道共用 sendStep）
+        assertEquals(6, events.size());
+        assertEquals("step", events.get(0).event());
+        assertEquals("step", events.get(1).event());
+        assertEquals("meta", events.get(2).event());
+        assertEquals("token", events.get(3).event());
+        assertEquals("Hello", events.get(3).content());
+        assertEquals(" world", events.get(4).content());
+        assertEquals("done", events.get(5).event());
 
         // assistant 消息落库：内容/状态/厂商/token（orchestrate 直测只终态落一次 assistant）
         ArgumentCaptor<Message> msgCap = ArgumentCaptor.forClass(Message.class);
@@ -229,10 +240,12 @@ class ConversationServiceTest {
         spySvc.orchestrate(emitter, new ChatRequest("conv-1", "hi", "1"), 1L, conv(1L, "conv-1"), 1L, 99L,
                 new AtomicReference<>());
 
-        // 事件仍是 meta → token → done，没有 error
-        assertEquals("meta", events.get(0).event());
-        assertEquals("token", events.get(1).event());
-        assertEquals("done", events.get(2).event());
+        // 事件仍是 retrieval-step → retrieval-step → meta → token → done（召回失败仅记 fallback 轨迹，不阻断流式）
+        assertEquals("step", events.get(0).event());
+        assertEquals("step", events.get(1).event());
+        assertEquals("meta", events.get(2).event());
+        assertEquals("token", events.get(3).event());
+        assertEquals("done", events.get(4).event());
 
         // system 消息不应包含「参考知识库」——证明 fallback 后未拼知识
         ChatMessage system = captured[0].get(0);
@@ -284,10 +297,12 @@ class ConversationServiceTest {
         spySvc.orchestrate(emitter, new ChatRequest("conv-1", "hi", "1"), 1L, conv(1L, "conv-1"), 1L, 99L,
                 new AtomicReference<>());
 
-        // 事件：meta → error（无 done）
-        assertEquals(2, events.size());
-        assertEquals("meta", events.get(0).event());
-        assertEquals("error", events.get(1).event());
+        // 事件：retrieval-step → retrieval-step → meta → error（无 done）
+        assertEquals(4, events.size());
+        assertEquals("step", events.get(0).event());
+        assertEquals("step", events.get(1).event());
+        assertEquals("meta", events.get(2).event());
+        assertEquals("error", events.get(3).event());
 
         // assistant 置 FAILED
         assertEquals(Message.MessageStatus.FAILED, pending.getStatus());

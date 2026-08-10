@@ -37,6 +37,20 @@ export function deleteConversation(conversationId) {
   return request.delete(`/chat/${conversationId}`)
 }
 
+// 消息反馈（T8/T9 点踩）：POST /api/chat/messages/{id}/feedback
+// payload: { rating: 'THUMBS_UP'|'THUMBS_DOWN'|null, reason: string|null }
+// rating 为 null 表示取消（删除该用户对该消息的反馈）；reason 仅点踩时由前端弹层收集。
+export function feedbackMessage(messageId, payload) {
+  return request.post(`/chat/messages/${messageId}/feedback`, payload)
+}
+
+// 回显当前用户对各消息的评分（T9 历史回显）：GET /api/chat/feedback/mine?messageIds=1,2,3
+// 返回 Map<messageId, rating> 形式对象：{ "285": "THUMBS_DOWN" }（键为字符串化的消息 id）。
+export function listFeedback(messageIds) {
+  const ids = (messageIds || []).filter((x) => x != null).join(',')
+  return request.get('/chat/feedback/mine', { params: { messageIds: ids } })
+}
+
 // SSE 流式对话（F5 验收点2/3）：POST + fetch + ReadableStream，带 Authorization，支持 AbortController 取消。
 // ⚠ 禁止原生 EventSource(GET)（无法带 token）；禁止 token 塞 URL；禁止整段渲染而非逐 token。
 // req: { agentId, content, conversationId? }；opts: { signal, onToken, onMeta, onDone, onError }

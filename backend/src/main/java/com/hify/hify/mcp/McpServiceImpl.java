@@ -63,13 +63,25 @@ public class McpServiceImpl implements McpService {
         }
     }
 
-    /** 解析 serverId → McpServer 实体；不存在/软删则抛 MCP_CALL_FAILED（由上层降级）。 */
+    /**
+     * 解析 serverId → McpServer 实体；不存在/已软删/已停用一律抛 MCP_CALL_FAILED（由上层降级）。
+     *
+     * <p>三道关卡：<b>①</b> serverId 非空；<b>②</b> 记录存在且未软删（{@code @SQLRestriction("deleted = 0")}
+     * 自动过滤）；<b>③</b> {@code status} 为启用（{@link McpServerStatus#isEnabled}）。
+     * 第③道是加载链路的「开关」校验：管理员把某个 Server 停用后，它不得再被连接、
+     * 不得再把工具暴露给模型；停用与软删除在加载侧一视同仁地排除。
+     */
     private McpServer resolveServer(Long serverId) {
         if (serverId == null) {
             throw new BizException(ErrorCode.MCP_CALL_FAILED, "MCP serverId 为空");
         }
-        return mcpServerRepository.findById(serverId)
+        McpServer server = mcpServerRepository.findById(serverId)
                 .orElseThrow(() -> new BizException(ErrorCode.MCP_CALL_FAILED,
-                        "MCP Server 不存在或已停用: " + serverId));
+                        "MCP Server 不存在或已删除: " + serverId));
+        if (!McpServerStatus.isEnabled(server.getStatus())) {
+            throw new BizException(ErrorCode.MCP_CALL_FAILED,
+                    "MCP Server 已停用: " + serverId + " status=" + server.getStatus());
+        }
+        return server;
     }
 }

@@ -65,7 +65,7 @@ class EvalRunnerTest {
 
     private RagQueryService.RagAnswer answered() {
         return new RagQueryService.RagAnswer(false, "年假 5 天 [来源1]", null,
-                List.of(new RagQueryService.SourceRef(1, "doc-1", 0, "年假条款")), 0.87, 0.60);
+                List.of(new RagQueryService.SourceRef(1, "doc-1", 0, "年假条款")), 0.87, 0.60, false);
     }
 
     private RagQueryService.RagAnswer refused() {
@@ -84,7 +84,7 @@ class EvalRunnerTest {
     }
 
     private LlmResponse judgeJson() {
-        return new LlmResponse("{\"faithfulness\":0.9,\"answer_relevancy\":0.85}", null, null, null, null);
+        return new LlmResponse("{\"faithfulness\":0.9,\"answer_relevancy\":0.85}", null, null, null, null, null);
     }
 
     @Test

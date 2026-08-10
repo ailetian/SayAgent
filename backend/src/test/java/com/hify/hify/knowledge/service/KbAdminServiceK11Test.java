@@ -3,7 +3,10 @@ package com.hify.hify.knowledge.service;
 import com.hify.hify.knowledge.entity.Document;
 import com.hify.hify.knowledge.entity.KnowledgeBase;
 import com.hify.hify.knowledge.repository.DocumentChunkRepository;
+import com.hify.hify.agent.service.AgentService;
+import com.hify.hify.knowledge.repository.AgentKbLinkRepository;
 import com.hify.hify.knowledge.repository.DocumentRepository;
+import com.hify.hify.knowledge.repository.IndexingJobRepository;
 import com.hify.hify.knowledge.repository.KnowledgeBaseRepository;
 import com.hify.hify.knowledge.repository.RetrievalLogRepository;
 import com.hify.hify.knowledge.web.KnowledgeBaseUpdateRequest;
@@ -42,6 +45,9 @@ class KbAdminServiceK11Test {
     @Mock DocumentRepository documentRepository;
     @Mock DocumentChunkRepository documentChunkRepository;
     @Mock RetrievalLogRepository retrievalLogRepository;
+    @Mock AgentService agentService;
+    @Mock AgentKbLinkRepository agentKbLinkRepository;
+    @Mock IndexingJobRepository indexingJobRepository;
 
     private KbAdminService kbAdminService;
 
@@ -49,7 +55,8 @@ class KbAdminServiceK11Test {
     void setUp() {
         loginAs("tester");
         kbAdminService = new KbAdminService(kbRepository, documentRepository, documentChunkRepository,
-                retrievalLogRepository, new KbAccessGuard(kbRepository));
+                retrievalLogRepository, new KbAccessGuard(kbRepository),
+                agentService, agentKbLinkRepository, indexingJobRepository);
         when(kbRepository.save(any(KnowledgeBase.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 

@@ -13,6 +13,7 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 
 /**
  * K3 单测共享夹具（仅测试用）。
@@ -74,6 +75,17 @@ public final class K3TestSupport {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             doc.write(baos);
             return baos.toByteArray();
+        }
+    }
+
+    /** 合法 DOC 夹具：真实 OLE2 .doc（src/test/resources/sample.doc，含可提取文本）。
+     *  用 ClassLoader 读取，不依赖绝对路径；依赖 poi-scratchpad 让 Tika 走 HWPF 解析。 */
+    public static byte[] buildDoc() throws IOException {
+        try (InputStream in = K3TestSupport.class.getClassLoader().getResourceAsStream("sample.doc")) {
+            if (in == null) {
+                throw new IllegalStateException("测试夹具 sample.doc 未找到，请确认 src/test/resources 在 classpath 上");
+            }
+            return in.readAllBytes();
         }
     }
 

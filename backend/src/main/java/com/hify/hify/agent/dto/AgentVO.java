@@ -28,6 +28,7 @@ public record AgentVO(
         Integer maxContextTokens,
         List<Long> knowledgeRefs,
         List<Long> toolRefs,
+        List<Long> skillRefs,
         LocalDateTime createdAt,
         LocalDateTime updatedAt) {
 
@@ -49,6 +50,7 @@ public record AgentVO(
                 a.getMaxContextTokens(),
                 a.getKnowledgeRefs(),
                 a.getToolRefs(),
+                a.getSkillRefs(),
                 a.getCreatedAt(),
                 a.getUpdatedAt());
     }

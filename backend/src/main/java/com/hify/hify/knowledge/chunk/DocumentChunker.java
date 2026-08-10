@@ -15,7 +15,8 @@ import java.util.regex.Pattern;
  * 切法按文档类型选：
  * <ul>
  *   <li>MD → {@link ChunkStrategy#MARKDOWN_HEADER}：按标题层级切，并把父级标题带进每块当上下文。</li>
- *   <li>TXT/PDF/DOCX → {@link ChunkStrategy#RECURSIVE}：按段落累积，超长段落再按句子/字切，块间留 overlap 防切断。</li>
+ *   <li>TXT/PDF/DOCX/DOC → {@link ChunkStrategy#RECURSIVE}：按段落累积，超长段落再按句子/字切，块间留 overlap 防切断。
+ *       （DOC 老文档同走 RECURSIVE，不单独分支——路由在 {@code chunk(text, docType, config)} 里：仅 MD 走 MARKDOWN_HEADER。）</li>
  * </ul>
  * 每块写连续 {@code seq}（1,2,3...），落 pg {@code document_chunk.seq}，供 Small-to-Big(R5) 与溯源。
  */
@@ -33,6 +34,23 @@ public class DocumentChunker {
     /** 规章条款识别：行首「第X条」或「Article N」——按条切的天然边界（R1 规章按条）。 */
     private static final Pattern ARTICLE = Pattern.compile(
             "(?m)^\\s*(第[零一二三四五六七八九十百千0-9]+条|Article\\s+[0-9]+).*$");
+
+    /**
+     * CJK/全角句末与 ASCII !? 作为切分点。
+     * <p><b>关键修复（T1/P1）</b>：ASCII 小数点 {@code .} 已从本类摘出，改由 {@link #ENGLISH_SENTENCE_END}
+     * 单独处理，避免把 {@code 3.5}/{@code v1.0.3}/{@code api.timeout}/{@code 第4.2节} 在小数点处误切。
+     */
+    private static final Pattern CJK_SENTENCE_END = Pattern.compile("(?<=[。！？!?])");
+
+    /**
+     * 英文句末 ASCII 小数点切分点（须满足全部条件，零宽匹配于小数点之后）：
+     * <ul>
+     *   <li>后接空白（真正的句末，而非数字/版本号内部的 {@code .}）；</li>
+     *   <li>排除小数 {@code \d.\d}——其小数点后紧跟数字，不满足「后接空白」；</li>
+     *   <li>排除缩写 {@code U.S.}——其小数点前为单个大写字母。</li>
+     * </ul>
+     */
+    private static final Pattern ENGLISH_SENTENCE_END = Pattern.compile("(?<=\\.)(?=\\s)(?<![A-Z]\\.)");
 
     /** 按文档类型自动选策略并切片。 */
     public List<Chunk> chunk(String text, DocType docType, RagConfig config) {
@@ -252,12 +270,19 @@ public class DocumentChunker {
     }
 
     private List<String> splitSentences(String para) {
-        // 以中英文句末标点切，保留标点（中文按句、英文按 .!?）
+        // 第一遍：按 CJK/全角句末与 ASCII !? 切（ASCII . 已摘出，避免小数点误切）
         List<String> out = new ArrayList<>();
-        for (String s : para.split("(?<=[。.!?！？])")) {
-            String t = s.strip();
-            if (!t.isEmpty()) {
-                out.add(t);
+        for (String seg : CJK_SENTENCE_END.split(para)) {
+            String t = seg.strip();
+            if (t.isEmpty()) {
+                continue;
+            }
+            // 第二遍：段内按英文句末 . 切，保护小数(\d.\d)与缩写(U.S.)，正常英文句号仍切
+            for (String s : ENGLISH_SENTENCE_END.split(t)) {
+                String u = s.strip();
+                if (!u.isEmpty()) {
+                    out.add(u);
+                }
             }
         }
         return out;

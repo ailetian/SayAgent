@@ -48,5 +48,7 @@ public record AgentCreateRequest(
 
         List<Long> knowledgeRefs,
 
-        List<Long> toolRefs) {
+        List<Long> toolRefs,
+
+        List<Long> skillRefs) {
 }

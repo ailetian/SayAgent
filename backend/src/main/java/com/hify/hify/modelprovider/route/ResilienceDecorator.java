@@ -2,6 +2,7 @@ package com.hify.hify.modelprovider.route;
 
 import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
+import com.hify.hify.common.tool.ToolDefinition;
 import com.hify.hify.modelprovider.client.ChatMessage;
 import com.hify.hify.modelprovider.client.LlmResponse;
 import com.hify.hify.modelprovider.client.ProviderClient;
@@ -130,6 +131,24 @@ public class ResilienceDecorator {
         public Flux<String> stream(List<ChatMessage> messages, ProviderConfig config, TokenUsage usage) {
             // 流式输出不套 CB/Retry/Bulkhead（Flux 流式场景无原生装饰器，且逐 token 取消由订阅方负责），直接透传。
             return delegate.stream(messages, config, usage);
+        }
+
+        @Override
+        public LlmResponse send(List<ChatMessage> messages, ProviderConfig config,
+                                List<ToolDefinition> tools) {
+            // 带工具的函数调用同样套四件套治理（§4.5），避免默认接口方法回退到无工具调用
+            Supplier<LlmResponse> supplier = () -> delegate.send(messages, config, tools);
+            Supplier<LlmResponse> resilient = Bulkhead.decorateSupplier(bh,
+                    Retry.decorateSupplier(retry,
+                            CircuitBreaker.decorateSupplier(cb, supplier)));
+            Supplier<Future<LlmResponse>> futureSupplier =
+                    () -> CompletableFuture.supplyAsync(resilient::get, scheduler);
+            Callable<LlmResponse> timed = TimeLimiter.decorateFutureSupplier(tl, futureSupplier);
+            try {
+                return timed.call();
+            } catch (Exception e) {
+                throw unwrap(e);
+            }
         }
     }
 

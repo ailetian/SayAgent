@@ -22,4 +22,7 @@ public interface AgentKbLinkRepository extends BaseRepository<AgentKbLink> {
 
     /** 取某 Agent→某库的有效挂载记录（卸载前校验归属，已按软删过滤）。 */
     Optional<AgentKbLink> findByAgentIdAndKbId(Long agentId, Long kbId);
+
+    /** 取某库的全部有效挂载记录（删除知识库前清挂载关系用，已按软删过滤）。 */
+    List<AgentKbLink> findByKbId(Long kbId);
 }

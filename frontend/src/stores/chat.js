@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { listConversations, listMessages, streamChat, renameConversation, pinConversation, deleteConversation } from '../api/chat'
+import { listConversations, listMessages, listFeedback, streamChat, renameConversation, pinConversation, deleteConversation } from '../api/chat'
 import { listAgents } from '../api/agent'
 
 // F5 聊天页状态（Pinia）：会话列表 / 当前会话 / 消息流 / 流式 / keyset 历史。
@@ -60,8 +60,22 @@ export const useChatStore = defineStore('chat', () => {
       } catch (e) {
         steps = []
       }
-      return { role: normalizeRole(m.role), content: m.content, id: m.id, steps }
+      return { role: normalizeRole(m.role), content: m.content, id: m.id, steps, myRating: '',
+        tokensIn: m.tokensIn ?? null, tokensOut: m.tokensOut ?? null }
     })
+    // 回显当前用户对各消息的反馈状态（T9）：整段加载时批量查 mine，挂到每条消息的 myRating。
+    // 失败不影响对话主流程（拦截器已统一提示）。
+    try {
+      const ids = items.filter((m) => m.id != null).map((m) => m.id)
+      if (ids.length) {
+        const ratings = (await listFeedback(ids)) || {}
+        items.forEach((m) => {
+          if (m.id != null && ratings[m.id] != null) m.myRating = ratings[m.id]
+        })
+      }
+    } catch (e) {
+      // 忽略：反馈回显失败不应阻断消息加载
+    }
     if (!lastId) {
       // 整段加载（打开会话 / 流式结束后刷新）
       messages.value = items

@@ -11,7 +11,8 @@ import com.hify.hify.conversation.repository.ConversationRepository;
 import com.hify.hify.conversation.repository.MessageRepository;
 import com.hify.hify.knowledge.repository.DocumentRepository;
 import com.hify.hify.knowledge.retriever.RetrievalPort;
-import com.hify.hify.mcp.McpService;
+import com.hify.hify.conversation.tool.ToolLoopRunner;
+import com.hify.hify.conversation.tool.ToolRegistry;
 import com.hify.hify.modelprovider.domain.enums.ProviderType;
 import com.hify.hify.modelprovider.dto.ModelProviderVO;
 import com.hify.hify.modelprovider.service.LlmStreamService;
@@ -83,7 +84,9 @@ class ConversationServiceStreamTest {
     @Mock
     private ConversationLogAsyncWriter conversationLogAsyncWriter;
     @Mock
-    private McpService mcpService;
+    private ToolRegistry toolRegistry;
+    @Mock
+    private ToolLoopRunner toolLoopRunner;
 
     /** sseExecutor.submit 返回的 Future 句柄，用于断连取消断言。 */
     private final Future<?> futureMock = mock(Future.class);
@@ -102,8 +105,12 @@ class ConversationServiceStreamTest {
 
         svc = new ConversationService(conversationRepository, messageRepository, userService,
                 sseExecutor, agentService, modelService, llmStreamService, retrievalPort,
-                documentRepository, conversationLogAsyncWriter, mcpService);
+                documentRepository, conversationLogAsyncWriter, toolRegistry, toolLoopRunner);
         spySvc = spy(svc);
+        // M8/T3：工具循环默认无工具、回显 seedMessages，保持既有流式完整性断言不受函数调用改造影响
+        lenient().when(toolRegistry.resolve(any())).thenReturn(List.of());
+        lenient().when(toolLoopRunner.run(any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> new ToolLoopRunner.LoopResult("", inv.getArgument(3)));
         // 拦截 send(...) 记录 SSE 事件，不真正写响应
         doAnswer(inv -> {
             events.add(inv.getArgument(1));

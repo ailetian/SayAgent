@@ -23,6 +23,16 @@ public class BizException extends RuntimeException {
     private final ErrorCode errorCode;
 
     /**
+     * 原始补充细节（可空：仅带错误码构造时为 null）。
+     *
+     * <p>为什么要单独存一份：{@link #getMessage()} 已经是「枚举文案：细节」的拼接结果，
+     * 若 {@code GlobalExceptionHandler} 再把它塞给 {@code Result.fail(ec, detail)}，
+     * 枚举文案会被拼第二遍（历史 bug：提示出现两段重复前缀）。
+     * 处理器改用本字段，保证响应 message 只拼一次。
+     */
+    private final String detail;
+
+    /**
      * 可选 HTTP 状态码（可空）。仅当异常由上游 HTTP 响应映射而来时填充（例如 LLM 调用
      * 返回 429/5xx），用于重试策略判断是否可恢复（§4.4：400/401/403 永不重试，429/5xx 重试）。
      */
@@ -36,6 +46,7 @@ public class BizException extends RuntimeException {
     public BizException(ErrorCode errorCode) {
         super(errorCode.getMessage());
         this.errorCode = errorCode;
+        this.detail = null;
         this.httpStatus = null;
     }
 
@@ -48,6 +59,7 @@ public class BizException extends RuntimeException {
     public BizException(ErrorCode errorCode, String detail) {
         super(errorCode.getMessage() + "：" + detail);
         this.errorCode = errorCode;
+        this.detail = detail;
         this.httpStatus = null;
     }
 
@@ -61,6 +73,7 @@ public class BizException extends RuntimeException {
     public BizException(ErrorCode errorCode, String detail, Integer httpStatus) {
         super(errorCode.getMessage() + "：" + detail);
         this.errorCode = errorCode;
+        this.detail = detail;
         this.httpStatus = httpStatus;
     }
 }

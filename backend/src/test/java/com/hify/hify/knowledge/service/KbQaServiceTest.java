@@ -2,13 +2,13 @@ package com.hify.hify.knowledge.service;
 
 import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
+import com.hify.hify.knowledge.config.RagConfig;
 import com.hify.hify.knowledge.config.RagProperties;
 import com.hify.hify.knowledge.eval.EvalRunner;
 import com.hify.hify.knowledge.entity.KnowledgeBase;
 import com.hify.hify.knowledge.entity.RetrievalLog;
 import com.hify.hify.knowledge.repository.KnowledgeBaseRepository;
 import com.hify.hify.knowledge.repository.RetrievalLogRepository;
-import com.hify.hify.knowledge.retriever.RetrievalPort;
 import com.hify.hify.knowledge.retriever.RetrievalResult;
 import com.hify.hify.knowledge.web.AskResponse;
 import com.hify.hify.knowledge.web.EvalRequest;
@@ -54,11 +54,11 @@ import static org.mockito.Mockito.when;
 class KbQaServiceTest {
 
     @Mock KnowledgeBaseRepository kbRepository;
-    @Mock RetrievalPort retrievalPort;
     @Mock RagQueryService ragQueryService;
     @Mock ProviderRouter providerRouter;
     @Mock RetrievalLogRepository retrievalLogRepository;
     @Mock EvalRunner evalRunner;
+    @Mock KbRetrievalService kbRetrievalService;
 
     private KbQaService kbQaService;
 
@@ -67,9 +67,13 @@ class KbQaServiceTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("tester", null, List.of()));
         RagProperties props = new RagProperties();
-        kbQaService = new KbQaService(retrievalPort, ragQueryService, props,
-                providerRouter, retrievalLogRepository, new KbAccessGuard(kbRepository), evalRunner);
+        kbQaService = new KbQaService(ragQueryService, providerRouter, retrievalLogRepository,
+                new KbAccessGuard(kbRepository), evalRunner, kbRetrievalService);
         when(kbRepository.findById(anyLong())).thenReturn(Optional.of(kb(1L, "tester")));
+        // KbRetrievalService 重构后遗留：probe/eval/ask 均走 kbRetrievalService（库级生效配置 + 检索）
+        when(kbRetrievalService.effectiveConfig(any())).thenReturn(
+                new RagConfig("bge-m3", 1024, 800, 120, 10, 4, 60, 0.6, 1, true, "zhparser_cfg"));
+        when(kbRetrievalService.retrieve(anyLong(), anyString())).thenReturn(List.of());
         when(providerRouter.getDefaultChatConfig())
                 .thenReturn(new ProviderConfig("http://x", "k", "m", 30000));
     }
@@ -84,7 +88,7 @@ class KbQaServiceTest {
 
     private RagQueryService.RagAnswer answered() {
         return new RagQueryService.RagAnswer(false, "答案 [来源1]", null,
-                List.of(new RagQueryService.SourceRef(1, "doc-1", 0, "标题")), 0.87, 0.60);
+                List.of(new RagQueryService.SourceRef(1, "doc-1", 0, "标题")), 0.87, 0.60, false);
     }
 
     // ===================== 问答 =====================
@@ -149,7 +153,7 @@ class KbQaServiceTest {
 
     @Test
     void probe_aboveThreshold_hitTrue_andNeverCallsLlm() {
-        when(retrievalPort.retrieveHybrid(anyString(), anyList(), any()))
+        when(kbRetrievalService.retrieve(anyLong(), anyString()))
                 .thenReturn(List.of(result("doc-1", 0, "片段内容", 0.91)));
 
         ProbeResultVO r = kbQaService.probe(1L, "问题");
@@ -162,7 +166,7 @@ class KbQaServiceTest {
 
     @Test
     void probe_noHit_returnsEmptyCandidatesAndHitFalse() {
-        when(retrievalPort.retrieveHybrid(anyString(), anyList(), any())).thenReturn(List.of());
+        when(kbRetrievalService.retrieve(anyLong(), anyString())).thenReturn(List.of());
 
         ProbeResultVO r = kbQaService.probe(1L, "问题");
 
@@ -177,7 +181,7 @@ class KbQaServiceTest {
         for (int i = 0; i < 8; i++) {
             many.add(result("doc-" + i, i, "c" + i, 0.9 - i * 0.01));
         }
-        when(retrievalPort.retrieveHybrid(anyString(), anyList(), any())).thenReturn(many);
+        when(kbRetrievalService.retrieve(anyLong(), anyString())).thenReturn(many);
 
         ProbeResultVO r = kbQaService.probe(1L, "问题");
 
@@ -187,7 +191,7 @@ class KbQaServiceTest {
     @Test
     void probe_longContent_truncatedToSnippet() {
         String long300 = "字".repeat(300);
-        when(retrievalPort.retrieveHybrid(anyString(), anyList(), any()))
+        when(kbRetrievalService.retrieve(anyLong(), anyString()))
                 .thenReturn(List.of(result("doc-1", 0, long300, 0.9)));
 
         ProbeResultVO r = kbQaService.probe(1L, "问题");

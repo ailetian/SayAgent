@@ -68,7 +68,8 @@ const nav = [
   { path: '/agents', label: 'Agent' },
   { path: '/knowledge', label: '知识库' },
   { path: '/models', label: '模型' },
-  { path: '/mcp', label: 'MCP' }
+  { path: '/mcp', label: 'MCP' },
+  { path: '/skills', label: '技能库' }
 ]
 
 function onLogout() {

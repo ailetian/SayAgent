@@ -10,8 +10,8 @@ import com.hify.hify.knowledge.entity.RetrievalLog;
 import com.hify.hify.knowledge.repository.DocumentChunkRepository;
 import com.hify.hify.knowledge.repository.DocumentRepository;
 import com.hify.hify.knowledge.repository.RetrievalLogRepository;
-import com.hify.hify.knowledge.retriever.RetrievalPort;
 import com.hify.hify.knowledge.retriever.RetrievalResult;
+import com.hify.hify.knowledge.service.KbRetrievalService;
 import com.hify.hify.modelprovider.client.ChatMessage;
 import com.hify.hify.modelprovider.client.LlmResponse;
 import com.hify.hify.modelprovider.client.ProviderConfig;
@@ -62,26 +62,35 @@ public class RagQueryService {
             + "引用资料时，在对应句末标注 [来源i]（i 为资料编号）。"
             + "若资料不足以回答，直接回复：" + REFUSAL_MESSAGE;
 
-    private final RetrievalPort retrievalPort;
+    /** 意图网关拦截话术（K0808 T3，写死、零成本、不调 LLM、不写 RetrievalLog）。 */
+    private static final String CANNED_GREETING = "你好！我是你的企业知识库助手，有什么可以帮你的吗？";
+    private static final String CANNED_IDENTITY = "我是 SayAgent 企业知识库问答助手，可以基于你挂载的知识库回答相关问题。";
+    private static final String CANNED_MEANINGLESS = "抱歉，我没太理解你的问题，可以换种说法再问我吗？";
+    private static final String CANNED_TOOL = "当前暂不支持该操作，我可以帮你检索知识库内容，请直接提问。";
+
     private final QueryRewriter queryRewriter;
     private final DocumentChunkRepository documentChunkRepository;
     private final DocumentRepository documentRepository;
     private final ProviderRouter providerRouter;
     private final RetrievalLogRepository retrievalLogRepository;
+    private final KbRetrievalService kbRetrievalService;
+    private final QueryIntentClassifier queryIntentClassifier;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public RagQueryService(RetrievalPort retrievalPort,
-                            QueryRewriter queryRewriter,
+    public RagQueryService(QueryRewriter queryRewriter,
                             DocumentChunkRepository documentChunkRepository,
                             DocumentRepository documentRepository,
                             ProviderRouter providerRouter,
-                            RetrievalLogRepository retrievalLogRepository) {
-        this.retrievalPort = retrievalPort;
+                            RetrievalLogRepository retrievalLogRepository,
+                            KbRetrievalService kbRetrievalService,
+                            QueryIntentClassifier queryIntentClassifier) {
         this.queryRewriter = queryRewriter;
         this.documentChunkRepository = documentChunkRepository;
         this.documentRepository = documentRepository;
         this.providerRouter = providerRouter;
         this.retrievalLogRepository = retrievalLogRepository;
+        this.kbRetrievalService = kbRetrievalService;
+        this.queryIntentClassifier = queryIntentClassifier;
     }
 
     /**
@@ -92,6 +101,26 @@ public class RagQueryService {
      */
     public RagAnswer query(RagQueryRequest req) {
         long start = System.currentTimeMillis();
+        // —— 意图网关（K0808 T2/T3）：问答最前先分类，非问题直接友好响应 ——
+        // 省去无谓检索，也避免「你好」被算成「答不上来」污染拒答率（呼应 K14 V7）。
+        // 判定主依据仍是「清洗后是否非空」（QueryIntentClassifier 内部复用 QueryRewriter.stripFiller），
+        // 故「你好，年假怎么请」清洗后剩「年假怎么请」→ QUESTION，不误杀。
+        // 注意：GREETING/IDENTITY/MEANINGLESS/TOOL 直接返回 canned，不检索、不调 LLM、不写 RetrievalLog。
+        QueryIntentClassifier.Intent intent = queryIntentClassifier.classify(req.query(), req.history());
+        if (intent == QueryIntentClassifier.Intent.GREETING) {
+            return RagAnswer.canned(CANNED_GREETING);
+        }
+        if (intent == QueryIntentClassifier.Intent.IDENTITY) {
+            return RagAnswer.canned(CANNED_IDENTITY);
+        }
+        if (intent == QueryIntentClassifier.Intent.MEANINGLESS) {
+            return RagAnswer.canned(CANNED_MEANINGLESS);
+        }
+        if (intent == QueryIntentClassifier.Intent.TOOL) {
+            return RagAnswer.canned(CANNED_TOOL);
+        }
+        // 其余为 QUESTION：继续原检索流程（R4 起）
+
         // R4：口语改写 + 指代消解
         String rewritten = queryRewriter.rewrite(req.query(), req.history());
         log.info("RagQuery start queryLen={} rewrittenLen={} mountedKb={} agentId={}",
@@ -106,8 +135,8 @@ public class RagQueryService {
             return RagAnswer.refuse(RetrievalLog.RefusalReason.NO_KB, req.ragConfig().scoreThreshold());
         }
 
-        // K4：混合检索
-        List<RetrievalResult> results = retrievalPort.retrieveHybrid(rewritten, req.mountedKbIds(), req.ragConfig());
+        // K4：混合检索（统一走 KbRetrievalService 唯一入口，避免多份 replicate）
+        List<RetrievalResult> results = kbRetrievalService.retrieve(req.mountedKbIds(), rewritten, req.ragConfig());
         if (results.isEmpty()) {
             RetrievalLog rlog = buildLog(req, rewritten, start, true, RetrievalLog.RefusalReason.NO_HIT,
                     null, req.ragConfig().scoreThreshold(), null, null, null);
@@ -169,7 +198,7 @@ public class RagQueryService {
 
         log.info("RagQuery answered hitCount={} sourceCount={} topScore={} costMs={}",
                 top.size(), sources.size(), topScore, System.currentTimeMillis() - start);
-        return new RagAnswer(false, answer, null, sources, topScore, threshold);
+        return new RagAnswer(false, answer, null, sources, topScore, threshold, false);
     }
 
     /**
@@ -324,11 +353,18 @@ public class RagQueryService {
             RetrievalLog.RefusalReason refusalReason,
             List<SourceRef> sources,
             double topScore,
-            double threshold) {
+            double threshold,
+            /** 是否由意图网关拦截（GREETING/IDENTITY/MEANINGLESS/TOOL），用于区分「友好响应」与「真实检索结果/拒答」。 */
+            boolean intentFiltered) {
 
-        /** 拒答结果构造。 */
+        /** 拒答结果构造（知识库确实查不到，intentFiltered=false）。 */
         public static RagAnswer refuse(RetrievalLog.RefusalReason reason, double threshold) {
-            return new RagAnswer(true, REFUSAL_MESSAGE, reason, List.of(), 0.0, threshold);
+            return new RagAnswer(true, REFUSAL_MESSAGE, reason, List.of(), 0.0, threshold, false);
+        }
+
+        /** 意图网关拦截后的友好响应（不检索、不调 LLM、不写 RetrievalLog，intentFiltered=true）。 */
+        public static RagAnswer canned(String message) {
+            return new RagAnswer(false, message, null, List.of(), 0.0, 0.0, true);
         }
     }
 

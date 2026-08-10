@@ -1,10 +1,13 @@
 package com.hify.hify.modelprovider.client;
 
+import com.hify.hify.common.tool.ToolCall;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+
+import java.util.List;
 
 /**
  * 大模型统一响应（§3.5 强类型 DTO，禁止裸 Map/JSONObject）。
@@ -32,4 +35,7 @@ public class LlmResponse {
 
     /** 上游原始 HTTP 状态码，便于排查。 */
     private Integer rawStatus;
+
+    /** 模型回传的工具调用意图列表（M8/T2 函数调用）；无工具调用时为 null。 */
+    private List<ToolCall> toolCalls;
 }

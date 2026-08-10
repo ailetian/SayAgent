@@ -14,5 +14,7 @@ public enum DocType {
     /** PDF（.pdf），Tika(PDFBox) 解析。 */
     PDF,
     /** Word 文档（.docx），Tika(POI) 解析。 */
-    DOCX
+    DOCX,
+    /** Word 老文档（.doc，OLE2 复合文档，Office 97-2003），Tika(POI HWPF) 解析。 */
+    DOC
 }

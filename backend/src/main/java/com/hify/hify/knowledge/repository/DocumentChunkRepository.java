@@ -87,6 +87,23 @@ public class DocumentChunkRepository {
     }
 
     /**
+     * 按文档业务 id 取该文档全部切片（按 seq 升序），供「切片预览」面板与前端排查。
+     *
+     * @param documentId 文档业务 id（与 document_chunk.document_id 同口径）
+     * @return 该文档全部切片（按 seq 升序）；无数据返回空列表
+     */
+    public List<DocumentChunk> findByDocumentId(String documentId) {
+        String sql = "SELECT document_id, kb_id, seq, content, embedding "
+                + "FROM document_chunk WHERE document_id = ? ORDER BY seq";
+        return jdbcTemplate.query(sql, (rs, i) -> new DocumentChunk(
+                rs.getString("document_id"),
+                rs.getLong("kb_id"),
+                rs.getInt("seq"),
+                rs.getString("content"),
+                rs.getString("embedding")), documentId);
+    }
+
+    /**
      * 按文档 + seq 范围取切片（K5 R5 Small-to-Big 上下文扩展）。
      *
      * <p>大白话：命中一块（seq=N）后，把前 {@code expand} 块（N-expand..N-1）和后 {@code expand} 块
@@ -115,5 +132,11 @@ public class DocumentChunkRepository {
 
     /** 单条待写入切片（seq + 文本 + 向量），供 {@link #replaceChunks} 批量写入。 */
     public record ChunkRow(int seq, String content, float[] vector) {
+    }
+
+    /** 按知识库兜底清全部切片向量（删除知识库 / 孤儿回收用，K0808）。 */
+    public void deleteByKbId(Long kbId) {
+        String sql = "DELETE FROM document_chunk WHERE kb_id = ?";
+        jdbcTemplate.update(sql, kbId);
     }
 }

@@ -44,6 +44,12 @@ const routes = [
     component: () => import('../views/McpServer.vue'),
     meta: { requiresAuth: true, layout: 'default', title: 'MCP 配置' }
   },
+  {
+    path: '/skills',
+    name: 'skills',
+    component: () => import('../views/Skills.vue'),
+    meta: { requiresAuth: true, layout: 'default', title: '技能库' }
+  },
   { path: '/', redirect: '/chat' },
   { path: '/:pathMatch(.*)*', redirect: '/chat' }
 ]

@@ -1,8 +1,10 @@
 package com.hify.hify.modelprovider.client;
 
+import com.hify.hify.common.tool.ToolDefinition;
 import com.hify.hify.modelprovider.domain.enums.ProviderType;
 
 import java.util.List;
+import java.util.function.Consumer;
 import reactor.core.publisher.Flux;
 
 /**
@@ -22,6 +24,41 @@ public interface ProviderClient {
      * @throws com.hify.hify.common.exception.BizException 非 2xx / 超时 / 解析失败，统一抛 {@code ErrorCode.LLM_CALL_FAILED}
      */
     LlmResponse send(List<ChatMessage> messages, ProviderConfig config);
+
+    /**
+     * 带「工具列表」的对话（M8/T2 函数调用），默认降级为不带工具的 {@link #send}。
+     *
+     * <p>大白话：把"可以给模型用的工具名片"一并传进去，模型若决定调某个工具就回一张"调用小票"。
+     * 默认实现直接忽略 {@code tools} 走原逻辑——只有真正支持 function calling 的厂商（如 DeepSeek/OpenAI，
+     * 由 {@code OpenAiClient} 重写）才会把工具拼进请求；Claude/Gemini/Ollama 等现有实现不重写也不会破坏编译。
+     *
+     * @param messages 对话历史
+     * @param config   本次调用配置
+     * @param tools    可交给模型选择的工具定义（来自 M8/T1 的 {@code common.tool.ToolDefinition}）
+     * @return 统一响应 {@link LlmResponse}（含可能的 {@code toolCalls}）
+     */
+    default LlmResponse send(List<ChatMessage> messages, ProviderConfig config, List<ToolDefinition> tools) {
+        return send(messages, config);
+    }
+
+    /**
+     * 带「工具列表」的流式对话（M8/T3 修复流式回归）：stream=true 同时携带 tools，
+     * 边收 SSE 边把 content 增量经 {@code tokenSink} 实时推给前端（实现真正逐字流式），
+     * 同时把流式下发的 tool_calls 碎片合并成完整 {@link ToolCall} 列表，末片返回 {@link LlmResponse}
+     * （供编排循环判断 finish_reason / 是否还要调工具）。默认实现忽略 tools、不走流式（直接委托非流式
+     * {@link #send(messages, config, tools)}，不调 tokenSink）——只有真正支持 function calling + 流式
+     * 的厂商（如 DeepSeek/OpenAI，由 {@code OpenAiClient} 重写）才会实时吐字并正确合并工具调用。
+     *
+     * @param messages  对话历史
+     * @param config    本次调用配置
+     * @param tools     可交给模型选择的工具定义（来自 common.tool.ToolDefinition）
+     * @param tokenSink 内容增量消费者（实时推前端用）；不流式实现可忽略
+     * @return 完整响应（含可能的 toolCalls 与本轮 token 用量）
+     */
+    default LlmResponse sendStreamWithTools(List<ChatMessage> messages, ProviderConfig config,
+                                            List<ToolDefinition> tools, Consumer<String> tokenSink) {
+        return send(messages, config, tools);
+    }
 
     /** 该 Client 对应的厂商类型，供路由器按 ProviderType 选主/降级（T4）。 */
     ProviderType getType();

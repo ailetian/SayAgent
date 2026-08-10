@@ -68,10 +68,12 @@ com.hify.hify
 │   ├── security/      # SecurityConfig, JwtUtil, AuthFilter, CustomUserDetailsService
 │   ├── exception/     # GlobalExceptionHandler, BizException
 │   ├── base/          # BaseEntity(id/createdAt/updatedAt), BaseRepository
+│   ├── tool/          # 统一工具契约(M8/T1)：Tool/ToolDefinition/ToolResult/ToolCall + BuiltinToolRegistry + builtin/(current-time)；跨 mcp/skill/conversation 共享，禁止业务包反向依赖
 │   └── util/
 ├── modelprovider/     # 模型提供商：Controller/Service/Repository/Entity + client/(ProviderClient 统一接口 + OpenAi/Claude/Gemini/Ollama Client) + ResilienceDecorator + ProviderRouter
 ├── agent/             # Agent 配置：Controller/Service/Repository + Agent(entity: 名称/prompt/providerRef/knowledgeRefs/toolRefs)
 ├── conversation/      # 对话引擎(SSE)：ConversationController(返回 SseEmitter) / ConversationService / Conversation / Message
+│   └── tool/          # 对话编排循环(M8/T3)：ToolLoopRunner(思考→执行→反思) + ToolRegistry(Agent toolRefs→工具列表) + ToolStepSink(进度出口)
 ├── knowledge/         # 知识库 RAG：KnowledgeService(上传/切分/向量化) / Document / DocumentChunk / embedding/EmbeddingService / retriever/RetrievalPort
 ├── workflow/          # 简版工作流：WorkflowEngine(顺序节点执行器) + node/(LLMNode/RetrievalNode/ToolNode/EndNode)
 └── mcp/               # MCP 工具：McpClientManager(连接 Server/发现 tools/执行调用) + McpServer

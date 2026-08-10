@@ -3,7 +3,7 @@
     <div class="up-head">
       <div class="up-title">上传文档到知识库 #{{ kbId }}</div>
       <div class="muted" style="font-size:12px">
-        单次最多 10 个；.txt / .md 可直接上传。PDF 需后端文件解析，当前接口按文本上传（前端仅支持 .txt/.md 读取）。
+        单次最多 10 个；支持 .txt / .md / .pdf / .docx。PDF、DOCX 由后端 Tika 解析，前端原样发送文件字节。
       </div>
     </div>
 
@@ -17,8 +17,8 @@
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-ghost" :disabled="drafts.length >= 10" @click="addText">+ 添加文本文档</button>
         <label class="btn-ghost" style="cursor:pointer;margin:0">
-          + 选择 .txt / .md 文件
-          <input type="file" accept=".txt,.md" multiple style="display:none" @change="onFiles" />
+          + 选择 .txt / .md / .pdf / .docx 文件
+          <input type="file" accept=".txt,.md,.pdf,.docx" multiple style="display:none" @change="onFiles" />
         </label>
       </div>
     </div>
@@ -28,7 +28,7 @@
       <div v-for="(d, i) in drafts" :key="i" class="up-draft">
         <span class="tag" :class="d.type === 'FILE' ? 'tag-b' : ''">{{ d.type }}</span>
         <span style="font-weight:600">{{ d.filename || d.title || '未命名' }}</span>
-        <span class="muted" style="font-size:12px">{{ (d.content || '').length }} 字</span>
+        <span class="muted" style="font-size:12px">{{ d.file ? formatSize(d.file.size) : ((d.content || '').length + ' 字') }}</span>
         <button class="link-danger" @click="removeDraft(i)">移除</button>
       </div>
     </div>
@@ -61,7 +61,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { uploadBatch } from '../api/knowledge'
+import { uploadBatch, uploadFiles } from '../api/knowledge'
 
 const props = defineProps({ kbId: { type: [Number, String], required: true } })
 const emit = defineEmits(['uploaded'])
@@ -91,34 +91,46 @@ function onFiles(e) {
   const files = Array.from(e.target.files || [])
   for (const f of files) {
     if (drafts.value.length >= 10) { error.value = '单次最多 10 个'; break }
-    const reader = new FileReader()
-    reader.onload = () => {
-      drafts.value.push({ type: 'FILE', title: f.name, filename: f.name, content: String(reader.result || '') })
-    }
-    reader.readAsText(f)
+    // 存原始 File 对象，上传时以二进制 multipart 发送（PDF/DOCX 不能当文本读）
+    drafts.value.push({ type: 'FILE', title: f.name, filename: f.name, file: f })
   }
   e.target.value = ''
 }
 
 function removeDraft(i) { drafts.value.splice(i, 1) }
 
+function buildNode(it, draft) {
+  return {
+    docId: it.docId,
+    status: it.status,
+    filename: draft.filename,
+    title: draft.title,
+    content: draft.content,
+    type: draft.type,
+    file: draft.file,
+    error: null
+  }
+}
+
 async function startUpload() {
   if (!drafts.value.length) return
   if (drafts.value.length > 10) { error.value = '单次最多 10 个'; return }
   uploading.value = true
   error.value = ''
-  const items = drafts.value.map((d) => ({ type: d.type, filename: d.filename, title: d.title, content: d.content }))
+  const textDrafts = drafts.value.filter((d) => d.type !== 'FILE')
+  const fileDrafts = drafts.value.filter((d) => d.type === 'FILE')
   try {
-    const resp = await uploadBatch(props.kbId, items)
-    const nodes = (resp.items || []).map((it, i) => ({
-      docId: it.docId,
-      status: it.status,
-      filename: items[i].filename,
-      title: items[i].title,
-      content: items[i].content,
-      type: items[i].type,
-      error: null
-    }))
+    const nodes = []
+    if (textDrafts.length) {
+      const items = textDrafts.map((d) => ({ type: d.type, filename: d.filename, title: d.title, content: d.content }))
+      const resp = await uploadBatch(props.kbId, items)
+      ;(resp.items || []).forEach((it, i) => nodes.push(buildNode(it, textDrafts[i])))
+    }
+    if (fileDrafts.length) {
+      const files = fileDrafts.map((d) => d.file)
+      const resp = await uploadFiles(props.kbId, files)
+      ;(resp.items || []).forEach((it, i) => nodes.push(buildNode(it, fileDrafts[i])))
+    }
     uploaded.value.push(...nodes)
     drafts.value = []
     emit('uploaded', uploaded.value)
@@ -133,16 +145,29 @@ async function retry(node) {
   uploading.value = true
   error.value = ''
   try {
-    const resp = await uploadBatch(props.kbId, [
-      { type: node.type, filename: node.filename, title: node.title, content: node.content }
-    ])
-    const it = resp.items && resp.items[0]
+    let it
+    if (node.file) {
+      const resp = await uploadFiles(props.kbId, [node.file])
+      it = resp.items && resp.items[0]
+    } else {
+      const resp = await uploadBatch(props.kbId, [
+        { type: node.type, filename: node.filename, title: node.title, content: node.content }
+      ])
+      it = resp.items && resp.items[0]
+    }
     if (it) { node.docId = it.docId; node.status = it.status }
   } catch (e) {
     error.value = e.message || '重试失败'
   } finally {
     uploading.value = false
   }
+}
+
+function formatSize(bytes) {
+  if (!bytes && bytes !== 0) return ''
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 }
 
 function statusClass(s) {

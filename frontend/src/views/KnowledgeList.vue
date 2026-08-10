@@ -20,6 +20,7 @@
             <th>Embedding</th>
             <th>创建者</th>
             <th>创建时间</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -35,9 +36,12 @@
             <td class="muted">{{ kb.embeddingModel || '默认' }}</td>
             <td class="muted">{{ kb.creatorId || '—' }}</td>
             <td class="muted">{{ fmt(kb.createdAt) }}</td>
+            <td>
+              <button class="btn-del" @click.stop="askDelete(kb)">删除</button>
+            </td>
           </tr>
           <tr v-if="!items.length && !loading">
-            <td colspan="8" class="muted" style="text-align:center;padding:30px">暂无知识库，点击右上角新建。</td>
+            <td colspan="9" class="muted" style="text-align:center;padding:30px">暂无知识库，点击右上角新建。</td>
           </tr>
         </tbody>
       </table>
@@ -50,6 +54,9 @@
     <p v-if="error" class="error-text" style="margin-top:14px">{{ error }}</p>
 
     <CreateKbWizard v-model="wizard" @created="onCreated" />
+
+    <!-- 删除确认弹窗：被 Agent 挂载时明确列出挂载方，不直接卸载 -->
+    <DeleteKbModal :visible="delVisible" :kb="delKb" @update:visible="delVisible = $event" @deleted="onDeleted" />
   </div>
 </template>
 
@@ -58,6 +65,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { listBases } from '../api/knowledge'
 import CreateKbWizard from '../components/CreateKbWizard.vue'
+import DeleteKbModal from '../components/DeleteKbModal.vue'
 
 const router = useRouter()
 const items = ref([])
@@ -66,6 +74,8 @@ const hasMore = ref(true)
 const loading = ref(false)
 const error = ref('')
 const wizard = ref(false)
+const delVisible = ref(false)
+const delKb = ref(null)
 
 async function loadMore() {
   if (loading.value || !hasMore.value) return
@@ -94,6 +104,17 @@ function open(kb) {
   router.push({ name: 'knowledge-detail', params: { kbId: String(kb.id) }, state: { kb } })
 }
 
+// 列表删除入口：打开确认弹窗（被 Agent 挂载时由弹窗列出挂载方，不直接卸载）。
+function askDelete(kb) {
+  delKb.value = kb
+  delVisible.value = true
+}
+
+// 弹窗内删除成功回调：从列表移除该行
+function onDeleted(id) {
+  items.value = items.value.filter((x) => x.id !== id)
+}
+
 function onCreated() {
   items.value = []
   nextCursor.value = null
@@ -113,5 +134,11 @@ onMounted(loadMore)
 .kb-list-wrap { max-height: calc(100vh - 220px); overflow: auto; padding: 6px 4px; }
 .kb-row { cursor: pointer; }
 .kb-row:hover td { background: var(--glass-strong); }
+.btn-del {
+  background: transparent; border: 1px solid #e5484d; color: #e5484d;
+  border-radius: 8px; padding: 4px 12px; font-size: 13px; cursor: pointer;
+}
+.btn-del:hover { background: #e5484d; color: #fff; }
+.btn-del:disabled { opacity: .5; cursor: not-allowed; }
 .kb-more { text-align: center; padding: 16px; font-size: 12px; }
 </style>

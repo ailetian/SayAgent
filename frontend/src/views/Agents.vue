@@ -24,7 +24,7 @@
         <tbody>
           <tr v-for="a in agents" :key="a.id">
             <td class="muted">{{ a.id }}</td>
-            <td><div style="font-weight:600">{{ a.name }}</div><div class="muted" style="font-size:12px">ref 知识 {{ (a.knowledgeRefs||[]).length }} · 工具 {{ (a.toolRefs||[]).length }}</div></td>
+            <td><div style="font-weight:600">{{ a.name }}</div><div class="muted" style="font-size:12px">ref 知识 {{ (a.knowledgeRefs||[]).length }} · 工具 {{ (a.toolRefs||[]).length }} · 技能 {{ (a.skillRefs||[]).length }}</div></td>
             <td><span class="tag tag-a">{{ modelLabel(a.modelProviderId) }}</span></td>
             <td>
               <span class="tag" :class="a.enabled ? 'tag-a' : 'tag-danger'">{{ a.enabled ? '启用' : '停用' }}</span>
@@ -52,10 +52,14 @@
           <div class="field"><input v-model="form.name" placeholder="如：客服助手" /></div>
         </div>
         <div>
-          <label class="form-label">绑定模型 *</label>
-          <el-select v-model="form.modelProviderId" placeholder="选择模型提供方" style="width:100%">
+          <label class="form-label">绑定模型（提供方） *</label>
+          <el-select v-model="form.modelProviderId" placeholder="选择模型提供方" style="width:100%" @change="onProviderChange">
             <el-option v-for="m in models" :key="m.id" :label="modelLabel(m.id)" :value="m.id" />
           </el-select>
+        </div>
+        <div>
+          <label class="form-label">模型名 *</label>
+          <div class="field"><input v-model="form.model" placeholder="如 gpt-4o / qwen-max（选提供方后自动带出，可改）" /></div>
         </div>
         <div class="span-2">
           <label class="form-label">说明</label>
@@ -95,6 +99,13 @@
           </el-select>
           <div class="muted" style="font-size:12px;margin-top:6px" v-if="!mcpServers.length">暂无 MCP Server，请先在「MCP 配置」页登记内部系统。</div>
         </div>
+        <div class="span-2">
+          <label class="form-label">技能引用（提示词块）</label>
+          <el-select v-model="form.skillRefs" multiple filterable placeholder="选择该 Agent 挂载的技能" style="width:100%">
+            <el-option v-for="sk in skills" :key="sk.id" :label="`${sk.name} (#${sk.id})`" :value="sk.id" />
+          </el-select>
+          <div class="muted" style="font-size:12px;margin-top:6px" v-if="!skills.length">暂无技能，请先在「技能库」页创建。</div>
+        </div>
         <div>
           <label class="form-label">启用</label>
           <el-switch v-model="form.enabled" />
@@ -119,20 +130,22 @@ import { listAgents, createAgent, updateAgent, deleteAgent } from '../api/agent'
 import { listModels } from '../api/model'
 import { listMcpServers } from '../api/mcp'
 import { listBases } from '../api/knowledge'
+import { listSkills } from '../api/skill'
 
 const agents = ref([])
 const models = ref([])
 const mcpServers = ref([])
 const knowledgeBases = ref([])
+const skills = ref([])
 const dialog = ref(false)
 const editing = ref(null)
 const saving = ref(false)
 
 const empty = () => ({
-  name: '', description: '', modelProviderId: null, systemPrompt: '',
+  name: '', description: '', modelProviderId: null, model: '', systemPrompt: '',
   enabled: true, defaultAgent: false,
   temperature: 0.7, topP: 1.0, maxTokens: 2048, maxContextTokens: 8000,
-  knowledgeRefs: [], toolRefs: []
+  knowledgeRefs: [], toolRefs: [], skillRefs: []
 })
 const form = ref(empty())
 
@@ -143,22 +156,23 @@ function modelLabel(id) {
 }
 
 async function load() {
-  const [a, m, ms, kb] = await Promise.all([
-    listAgents(), listModels(), listMcpServers(), listBases()
+  const [a, m, ms, kb, sk] = await Promise.all([
+    listAgents(), listModels(), listMcpServers(), listBases(), listSkills()
   ])
   agents.value = a
   models.value = m
   mcpServers.value = ms
   knowledgeBases.value = (kb && kb.items) || []
+  skills.value = sk || []
 }
 
 function toForm(a) {
   return {
-    name: a.name, description: a.description || '', modelProviderId: a.modelProviderId,
+    name: a.name, description: a.description || '', modelProviderId: a.modelProviderId, model: a.model || '',
     systemPrompt: a.systemPrompt || '', enabled: !!a.enabled, defaultAgent: !!a.defaultAgent,
     temperature: a.temperature ?? 0.7, topP: a.topP ?? 1.0,
     maxTokens: a.maxTokens ?? 2048, maxContextTokens: a.maxContextTokens ?? 8000,
-    knowledgeRefs: a.knowledgeRefs || [], toolRefs: a.toolRefs || []
+    knowledgeRefs: a.knowledgeRefs || [], toolRefs: a.toolRefs || [], skillRefs: a.skillRefs || []
   }
 }
 
@@ -166,6 +180,11 @@ function openCreate() {
   editing.value = null
   form.value = empty()
   dialog.value = true
+}
+
+function onProviderChange(id) {
+  const m = models.value.find((x) => x.id === id)
+  form.value.model = (m && m.model) ? m.model : ''
 }
 
 function openEdit(a) {

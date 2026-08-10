@@ -4,10 +4,14 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.hify.hify.agent.dto.AgentVO;
 import com.hify.hify.agent.service.AgentService;
 import com.hify.hify.common.exception.BizException;
+import com.hify.hify.skill.service.SkillService;
 import com.hify.hify.common.exception.ErrorCode;
 import com.hify.hify.conversation.ConversationLogAsyncWriter;
 import com.hify.hify.conversation.ChatContext;
 import com.hify.hify.conversation.ChatContext.CallTrace;
+import com.hify.hify.conversation.tool.ToolLoopRunner;
+import com.hify.hify.conversation.tool.ToolRegistry;
+import com.hify.hify.common.tool.Tool;
 import com.hify.hify.conversation.dto.ChatHistoryPage;
 import com.hify.hify.conversation.dto.ChatRequest;
 import com.hify.hify.conversation.dto.LogRecord;
@@ -17,18 +21,15 @@ import com.hify.hify.conversation.repository.ConversationRepository;
 import com.hify.hify.conversation.repository.MessageRepository;
 import com.hify.hify.conversation.web.ChatMessageVO;
 import com.hify.hify.conversation.web.ConversationVO;
-import com.hify.hify.knowledge.entity.Document;
-import com.hify.hify.knowledge.repository.DocumentRepository;
-import com.hify.hify.knowledge.retriever.RetrievalPort;
+import com.hify.hify.knowledge.retriever.RetrievalResult;
+import com.hify.hify.knowledge.service.KbRetrievalService;
+import com.hify.hify.knowledge.service.QueryIntentClassifier;
 import com.hify.hify.user.UserService;
 import com.hify.hify.modelprovider.client.ChatMessage;
 import com.hify.hify.modelprovider.client.TokenUsage;
 import com.hify.hify.modelprovider.dto.ModelProviderVO;
 import com.hify.hify.modelprovider.service.LlmStreamService;
 import com.hify.hify.modelprovider.service.ModelService;
-import com.hify.hify.mcp.McpService;
-import com.hify.hify.mcp.dto.McpToolCallResult;
-import com.hify.hify.mcp.dto.ToolDefinition;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.extern.slf4j.Slf4j;
@@ -76,10 +77,11 @@ public class ConversationService {
     private static final int TITLE_PREFIX_LEN = 20;
     /** 历史回放最多带入 N 条（避免超出上下文）。 */
     private static final int MAX_HISTORY = 20;
-    /** 知识召回 topK（T3 默认 4）。 */
+    /** 知识召回 topK（T3 默认 4，与探针/混合检索对齐）。 */
     private static final int RETRIEVE_TOP_K = 4;
-    /** 知识召回相似度阈值（低于此分不纳入上下文）。 */
-    private static final double RETRIEVE_THRESHOLD = 0.6;
+    /** 配置了知识库但本次检索无命中时，直接返回的拒答话术（系统硬开关，不调 LLM 编造）。 */
+    private static final String NO_KB_HIT_REPLY =
+            "抱歉，我暂时没有查到关于这个问题的相关资料，建议您联系人工客服或换种方式描述需求。";
 
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
@@ -88,10 +90,12 @@ public class ConversationService {
     private final AgentService agentService;
     private final ModelService modelService;
     private final LlmStreamService llmStreamService;
-    private final RetrievalPort retrievalPort;
-    private final DocumentRepository documentRepository;
     private final ConversationLogAsyncWriter conversationLogAsyncWriter;
-    private final McpService mcpService;
+    private final ToolRegistry toolRegistry;
+    private final ToolLoopRunner toolLoopRunner;
+    private final SkillService skillService;
+    private final KbRetrievalService kbRetrievalService;
+    private final QueryIntentClassifier intentClassifier;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ConversationService(ConversationRepository conversationRepository,
@@ -101,10 +105,12 @@ public class ConversationService {
                                AgentService agentService,
                                ModelService modelService,
                                LlmStreamService llmStreamService,
-                               RetrievalPort retrievalPort,
-                               DocumentRepository documentRepository,
                                ConversationLogAsyncWriter conversationLogAsyncWriter,
-                               McpService mcpService) {
+                               ToolRegistry toolRegistry,
+                               ToolLoopRunner toolLoopRunner,
+                               SkillService skillService,
+                               KbRetrievalService kbRetrievalService,
+                               QueryIntentClassifier intentClassifier) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.userService = userService;
@@ -112,10 +118,12 @@ public class ConversationService {
         this.agentService = agentService;
         this.modelService = modelService;
         this.llmStreamService = llmStreamService;
-        this.retrievalPort = retrievalPort;
-        this.documentRepository = documentRepository;
         this.conversationLogAsyncWriter = conversationLogAsyncWriter;
-        this.mcpService = mcpService;
+        this.toolRegistry = toolRegistry;
+        this.toolLoopRunner = toolLoopRunner;
+        this.skillService = skillService;
+        this.kbRetrievalService = kbRetrievalService;
+        this.intentClassifier = intentClassifier;
     }
 
     // ===================== T2 端点支撑 =====================
@@ -254,63 +262,107 @@ public class ConversationService {
         try {
             ChatContext ctx = prepare(req, userId, conv, emitter);
             sendMeta(emitter, ctx);
-            // M7/T3：若 Agent 配置了 toolRefs，调 MCP 工具把结果拼回上下文继续生成（§2 模块8）
-            // 用独立 final 变量承接，避免重赋值 ctx 导致 lambda 捕获「非 effectively final」编译错误（§4.2）
-            ChatContext enrichedCtx = enrichWithMcpTools(ctx, emitter);
+            // 拒答硬开关（知识库兜底）：配置了知识库但本次检索无命中，直接返回固定话术，不再调用 LLM 编造。
+            if (ctx.getKnowledgeRefs() != null && !ctx.getKnowledgeRefs().isEmpty()
+                    && (ctx.getRetrievedKnowledge() == null || ctx.getRetrievedKnowledge().isBlank())
+                    && !ctx.isKbRetrievalSkipped()) {
+                sendToken(emitter, NO_KB_HIT_REPLY);
+                finalizeStreamedAnswer(emitter, NO_KB_HIT_REPLY, ctx, conversationId, convId,
+                        assistantMsgId, new TokenUsage(), start);
+                return;
+            }
+            // M8/T3：解析本轮可用工具（MCP 适配器 + 内置 current-time），跑「思考→执行→反思」循环（流式）
+            List<Tool> tools = toolRegistry.resolve(ctx.getToolRefs());
             TokenUsage usage = new TokenUsage();
-            StringBuilder answer = new StringBuilder();
-            Disposable d = llmStreamService.stream(enrichedCtx.getMessages(), enrichedCtx.getProviderRef(), usage)
-                    .subscribe(
-                            token -> {
-                                answer.append(token);
-                                sendToken(emitter, token);
-                            },
-                            err -> {
-                                String partial = answer.toString();
-                                // 先落库/写日志（确保前端 loadHistory 重载时已读到那条失败回答，避免「回复一闪而过」），
-                                // 再发 error 终结帧并关闭流（前端必定解除流式锁定）。二者任一异常仅告警，绝不阻断。
-                                try {
-                                    finalizeAssistantFailed(assistantMsgId, convId, partial, enrichedCtx);
-                                } catch (Exception ex) {
-                                    log.warn("finalize assistant failed error-path convId={}", conversationId, ex);
+            ToolLoopRunner.LoopResult loop = toolLoopRunner.run(ctx, tools, usage, ctx.getMessages(),
+                    (label, status) -> sendStep(emitter, label, status, "tool"),
+                    token -> sendToken(emitter, token));
+            // 方案①（M8/T3 性能修复）+ 流式回归修复：工具循环已「边生成边把字经 tokenSink 推给前端」，
+            // 不再重新调大模型（避免整段 KB+MCP 上下文重 prefill 的空等），且用户实时看到逐字输出。
+            // 循环结束后此处仅做落库 + 发 done（不再切 30 字假流式）。
+            String finalAnswer = loop.finalAnswer();
+            if (finalAnswer != null && !finalAnswer.isBlank()) {
+                finalizeStreamedAnswer(emitter, finalAnswer, ctx, conversationId, convId, assistantMsgId, usage, start);
+            } else {
+                // 兜底：finalAnswer 为空（如触顶 MAX_TOOL_ROUNDS 仍只要求调工具）才退回现有流式重生成
+                StringBuilder answer = new StringBuilder();
+                Disposable d = llmStreamService.stream(loop.messages(), ctx.getProviderRef(), usage)
+                        .subscribe(
+                                token -> {
+                                    answer.append(token);
+                                    sendToken(emitter, token);
+                                },
+                                err -> {
+                                    String partial = answer.toString();
+                                    // 先落库/写日志（确保前端 loadHistory 重载时已读到那条失败回答，避免「回复一闪而过」），
+                                    // 再发 error 终结帧并关闭流（前端必定解除流式锁定）。二者任一异常仅告警，绝不阻断。
+                                    try {
+                                        finalizeAssistantFailed(assistantMsgId, convId, partial, ctx);
+                                    } catch (Exception ex) {
+                                        log.warn("finalize assistant failed error-path convId={}", conversationId, ex);
+                                    }
+                                    try {
+                                        writeLog(ctx, partial, usage, true, start, false, err.getMessage());
+                                    } catch (Exception ex) {
+                                        log.warn("write log error-path convId={}", conversationId, ex);
+                                    }
+                                    sendError(emitter, err.getMessage());
+                                    closeQuietly(emitter);
+                                },
+                                () -> {
+                                    String full = answer.toString();
+                                    int inTok = usage.getPromptTokens() > 0 ? usage.getPromptTokens()
+                                            : estimateTokens(ctx.getMessages());
+                                    int outTok = usage.getCompletionTokens() > 0 ? usage.getCompletionTokens()
+                                            : estimateTokens(full);
+                                    // 先落库/写日志（确保前端 loadHistory 重载时一定已读到完整回答，避免「回复一闪而过」）；
+                                    // 再发 done 终结帧并关闭流（前端必定解除流式锁定）。二者任一异常仅告警，绝不阻断前端。
+                                    try {
+                                        finalizeAssistantOk(assistantMsgId, convId, full, ctx, inTok, outTok);
+                                    } catch (Exception ex) {
+                                        log.warn("finalize assistant ok convId={} failed (answer already sent to client)", conversationId, ex);
+                                    }
+                                    try {
+                                        writeLog(ctx, full, usage, false, start, true, null);
+                                    } catch (Exception ex) {
+                                        log.warn("write log convId={} failed", conversationId, ex);
+                                    }
+                                    sendDone(emitter, ctx, inTok, outTok, false);
+                                    closeQuietly(emitter);
                                 }
-                                try {
-                                    writeLog(enrichedCtx, partial, usage, true, start, false, err.getMessage());
-                                } catch (Exception ex) {
-                                    log.warn("write log error-path convId={}", conversationId, ex);
-                                }
-                                sendError(emitter, err.getMessage());
-                                closeQuietly(emitter);
-                            },
-                            () -> {
-                                String full = answer.toString();
-                                int inTok = usage.getPromptTokens() > 0 ? usage.getPromptTokens()
-                                        : estimateTokens(enrichedCtx.getMessages());
-                                int outTok = usage.getCompletionTokens() > 0 ? usage.getCompletionTokens()
-                                        : estimateTokens(full);
-                                // 先落库/写日志（确保前端 loadHistory 重载时一定已读到完整回答，避免「回复一闪而过」）；
-                                // 再发 done 终结帧并关闭流（前端必定解除流式锁定）。二者任一异常仅告警，绝不阻断前端。
-                                try {
-                                    finalizeAssistantOk(assistantMsgId, convId, full, enrichedCtx, outTok);
-                                } catch (Exception ex) {
-                                    log.warn("finalize assistant ok convId={} failed (answer already sent to client)", conversationId, ex);
-                                }
-                                try {
-                                    writeLog(enrichedCtx, full, usage, false, start, true, null);
-                                } catch (Exception ex) {
-                                    log.warn("write log convId={} failed", conversationId, ex);
-                                }
-                                sendDone(emitter, enrichedCtx, inTok, outTok, false);
-                                closeQuietly(emitter);
-                            }
-                    );
-            // 记下订阅句柄，供 §4.6 SSE 断连时取消（不白烧 token）
-            disposableRef.set(d);
+                        );
+                // 记下订阅句柄，供 §4.6 SSE 断连时取消（不白烧 token）
+                disposableRef.set(d);
+            }
         } catch (Exception e) {
             log.warn("chat orchestrate failed convId={}", conversationId, e);
             sendError(emitter, e.getMessage());
             closeQuietly(emitter);
         }
+    }
+
+    /**
+     * 工具循环已把答案逐字流式推给前端，此处仅做落库 + 发 done + 关流。
+     * 不再切 30 字假流式——真正的逐字输出已在循环里经 tokenSink（sendToken）实时推给前端。
+     * 任一异常仅告警，绝不阻断前端（片段已推，用户已看到）。
+     */
+    private void finalizeStreamedAnswer(SseEmitter emitter, String finalAnswer, ChatContext ctx,
+                                        String conversationId, Long convId, Long assistantMsgId,
+                                        TokenUsage usage, Instant start) {
+        int inTok = usage.getPromptTokens() > 0 ? usage.getPromptTokens() : estimateTokens(ctx.getMessages());
+        int outTok = usage.getCompletionTokens() > 0 ? usage.getCompletionTokens() : estimateTokens(finalAnswer);
+        try {
+            finalizeAssistantOk(assistantMsgId, convId, finalAnswer, ctx, inTok, outTok);
+        } catch (Exception ex) {
+            log.warn("finalize assistant ok (streamed) convId={} failed", conversationId, ex);
+        }
+        try {
+            writeLog(ctx, finalAnswer, usage, false, start, true, null);
+        } catch (Exception ex) {
+            log.warn("write log (streamed) convId={} failed", conversationId, ex);
+        }
+        sendDone(emitter, ctx, inTok, outTok, false);
+        closeQuietly(emitter);
     }
 
     /** 组装编排上下文：解析 Agent → 取厂商配置 → 召回知识 → 拼最终 messages。 */
@@ -326,6 +378,7 @@ public class ConversationService {
         List<ChatMessage> history = loadHistory(conversationId);
         List<Long> knowledgeRefs = agent.knowledgeRefs() == null ? List.of() : agent.knowledgeRefs();
         List<Long> toolRefs = agent.toolRefs() == null ? List.of() : agent.toolRefs();
+        List<Long> skillRefs = agent.skillRefs() == null ? List.of() : agent.skillRefs();
 
         ChatContext ctx = ChatContext.builder()
                 .userId(userId)
@@ -333,39 +386,47 @@ public class ConversationService {
                 .agentIdStr(agentIdStr)
                 .agentDbId(agentDbId)
                 .agentName(agent.name())
-                .systemPrompt(agent.systemPrompt())
+                // M8/T4：把 Agent 挂载的技能提示词拼进人设（提示词型 skill，配置时静态组合）
+                .systemPrompt(skillService.composePersona(agent.systemPrompt(), skillRefs))
                 .providerRef(providerRef)
                 .providerType(providerType)
                 .model(model)
                 .knowledgeRefs(knowledgeRefs)
                 .toolRefs(toolRefs)
+                .skillRefs(skillRefs)
                 .question(req.message())
                 .history(history)
                 .build();
         boolean hasKB = ctx.getKnowledgeRefs() != null && !ctx.getKnowledgeRefs().isEmpty();
-        if (hasKB) sendStep(emitter, "正在检索知识库…", "running", "retrieval");
-        List<RetrievalPort.RetrievedChunk> hits = retrieveKnowledge(ctx);
-        String knowledge = toKnowledgeText(hits);
-        if (hasKB) {
+        // 意图网关：复用 QueryIntentClassifier，非 QUESTION（问候/问身份/无意义/动作占位）直接跳过知识库检索，
+        // 避免「你好」这类问候被无谓检索、且被 orchestrate 兜底误答成「找不到资料」。与 RagQueryService 的意图网关保持一致。
+        QueryIntentClassifier.Intent intent = intentClassifier.classify(ctx.getQuestion());
+        boolean skipKb = hasKB && intent != QueryIntentClassifier.Intent.QUESTION;
+        ctx = ctx.withKbRetrievalSkipped(skipKb);
+        List<RetrievalResult> hits = List.of();
+        if (hasKB && !skipKb) {
+            sendStep(emitter, "正在检索知识库…", "running", "retrieval");
+            hits = retrieveKnowledge(ctx);
+            String knowledge = toKnowledgeText(hits);
             sendStep(emitter, knowledge != null && !knowledge.isEmpty()
                     ? "知识库检索完成，已获取相关资料" : "知识库检索完成（无命中片段）", "done", "retrieval");
-        }
-        // 记录知识库检索轨迹：每条命中都留痕（含 docId / 相似度 / 片段摘要）；即便无命中也记一条，
-        // 满足对话日志铁律「KB 调用记录必须持久化、可事后回看，即便模型最终未引用也要留痕」。
-        if (hits.isEmpty()) {
-            ctx.getTrace().add(new CallTrace("retrieval", "知识库检索完成（无命中片段）",
-                    "done", null, null, null, null, null, true));
-        } else {
-            for (RetrievalPort.RetrievedChunk h : hits) {
-                String snippet = h.content() == null ? "" : h.content();
-                if (snippet.length() > 200) snippet = snippet.substring(0, 200) + "…";
-                ctx.getTrace().add(new CallTrace("retrieval",
-                        "知识库命中：文档 " + h.documentId() + " 片段#" + h.chunkIndex()
-                                + "（相似度 " + String.format("%.3f", h.score()) + "）",
-                        "done", h.documentId(), h.score(), null, null, snippet, true));
+            // 记录知识库检索轨迹：仅 hasKB 且实际检索才写轨迹，满足对话日志铁律
+            // 「KB 调用记录必须持久化、可事后回看」。意图跳过检索的不写任何 KB 轨迹，避免"假调用"误导。
+            if (hits.isEmpty()) {
+                ctx.getTrace().add(new CallTrace("retrieval", "知识库检索完成（无命中片段）",
+                        "done", null, null, null, null, null, true));
+            } else {
+                for (RetrievalResult h : hits) {
+                    String snippet = h.content() == null ? "" : h.content();
+                    if (snippet.length() > 200) snippet = snippet.substring(0, 200) + "…";
+                    ctx.getTrace().add(new CallTrace("retrieval",
+                            "知识库命中：文档 " + h.documentId() + " 片段#" + h.chunkIndex()
+                                    + "（相似度 " + String.format("%.3f", h.semanticScore()) + "）",
+                            "done", h.documentId(), h.semanticScore(), null, null, snippet, true));
+                }
             }
+            ctx = ctx.withRetrievedKnowledge(knowledge);
         }
-        ctx = ctx.withRetrievedKnowledge(knowledge);
         ctx = ctx.withMessages(buildMessages(ctx));
         return ctx;
     }
@@ -393,28 +454,30 @@ public class ConversationService {
     }
 
     /**
-     * 召回知识（带 fallback）：任一切库失败都跳过该库；全部不可用也不阻断 LLM 直接答（§3.3 / T3 验收点3）。
-     * 多库结果合并后按相似度降序返回全部命中（topK 截断留给 {@link #toKnowledgeText}）。
+     * 召回知识（统一走 KbRetrievalService 唯一入口，与探针 / ask / eval 行为完全一致）：
+     * 逐个挂载库按「库级生效配置」跑混合检索，阈值取自该库配置而非写死常量，
+     * 多库结果合并后按语义余弦相似度（semanticScore）降序返回（topK 截断留给 {@link #toKnowledgeText}）。
+     * 任一切库失败都跳过该库；全部不可用也不阻断 LLM 直接答（§3.3 / T3 验收点3）。
      *
-     * @return 命中片段列表（含相似度），无命中或不可用返回空列表，不返回 null。
+     * @return 命中片段列表（含语义相似度），无命中或不可用返回空列表，不返回 null。
      */
-    private List<RetrievalPort.RetrievedChunk> retrieveKnowledge(ChatContext ctx) {
+    private List<RetrievalResult> retrieveKnowledge(ChatContext ctx) {
         if (ctx.getKnowledgeRefs().isEmpty()) {
             return List.of();
         }
         try {
-            List<RetrievalPort.RetrievedChunk> hits = new ArrayList<>();
+            List<RetrievalResult> hits = new ArrayList<>();
             for (Long kbId : ctx.getKnowledgeRefs()) {
                 try {
-                    // K11 缺陷 A：先取本库未软删的文档业务 id，下推 PG 用 document_id IN(...) 过滤孤儿 chunk
-                    List<String> allowedDocIds = documentRepository.findByKbId(kbId).stream()
-                            .map(Document::getDocumentId).toList();
-                    hits.addAll(retrievalPort.retrieve(ctx.getQuestion(), allowedDocIds, RETRIEVE_TOP_K, RETRIEVE_THRESHOLD));
+                    // 与探针完全一致：阈值来自库级生效配置，库不存在抛异常被此处捕获并跳过
+                    List<RetrievalResult> kbHits = kbRetrievalService.retrieve(kbId, ctx.getQuestion());
+                    log.info("kbId={} retrieve hits={}", kbId, kbHits.size());
+                    hits.addAll(kbHits);
                 } catch (Exception e) {
                     log.warn("knowledge retrieve failed for kbId={}, skip", kbId, e);
                 }
             }
-            hits.sort(Comparator.comparingDouble(RetrievalPort.RetrievedChunk::score).reversed());
+            hits.sort(Comparator.comparingDouble(RetrievalResult::semanticScore).reversed());
             return hits;
         } catch (Exception e) {
             log.warn("knowledge retrieval unavailable, continue without context", e);
@@ -423,7 +486,7 @@ public class ConversationService {
     }
 
     /** 把命中片段拼成塞进 system 提示的知识文本（多库合并后取 topK）。 */
-    private String toKnowledgeText(List<RetrievalPort.RetrievedChunk> hits) {
+    private String toKnowledgeText(List<RetrievalResult> hits) {
         if (hits.isEmpty()) {
             return "";
         }
@@ -433,87 +496,6 @@ public class ConversationService {
             sb.append("- ").append(hits.get(i).content()).append("\n");
         }
         return sb.toString().strip();
-    }
-
-    /**
-     * M7/T3：按 Agent.toolRefs 调 MCP 工具，把结果拼回上下文继续生成（§2 模块8）。
-     *
-     * <p>大白话：Agent 挂了哪些「外部系统的手」(MCP server id)，就在这里逐个叫外援——先发现工具有哪些，
-     * 再调第一个可用工具拿结果，把结果作为一条 system 消息追加进发给 LLM 的 messages。任一 server 失败
-     * 只降级成「工具暂时不可用」提示，绝不抛异常中断对话（§4.5）；本方法在事务外执行（orchestrate 跑在 sseExecutor）。
-     *
-     * @param ctx 已组装的编排上下文
-     * @return 可能追加了工具结果消息的上下文
-     */
-    private ChatContext enrichWithMcpTools(ChatContext ctx, SseEmitter emitter) {
-        List<Long> toolRefs = ctx.getToolRefs();
-        if (toolRefs == null || toolRefs.isEmpty()) {
-            return ctx;
-        }
-        StringBuilder toolCtx = new StringBuilder();
-        for (Long serverId : toolRefs) {
-            try {
-                sendStep(emitter, "正在调用 MCP 工具：server #" + serverId, "running", "tool");
-                List<ToolDefinition> tools = mcpService.listTools(serverId);
-                if (tools == null || tools.isEmpty()) {
-                    toolCtx.append("\n- [MCP server ").append(serverId).append("] 未发现可用工具");
-                    sendStep(emitter, "MCP server #" + serverId + "：未发现可用工具", "done", "tool");
-                    ctx.getTrace().add(new CallTrace("tool",
-                            "MCP server #" + serverId + "：未发现可用工具", "done",
-                            null, null, null, null, null, false));
-                    continue;
-                }
-                // 简单场景取第一个工具调用（生产可交由模型按意图选工具，超出 T3 范围）；参数用用户问题
-                ToolDefinition td = tools.get(0);
-                String argsJson = buildMcpArgs(ctx.getQuestion());
-                McpToolCallResult res = mcpService.callTool(serverId, td.name(), argsJson);
-                String full = res.result() == null ? "" : res.result();
-                String snippet = full.length() > 200 ? full.substring(0, 200) + "…" : full;
-                boolean ok = !(res.fallback() || !res.success());
-                if (!ok) {
-                    toolCtx.append("\n- [MCP server ").append(serverId).append("] 工具暂时不可用");
-                    sendStep(emitter, "MCP server #" + serverId + "：工具暂时不可用", "done", "tool");
-                } else {
-                    toolCtx.append("\n- [MCP server ").append(serverId).append(" / ").append(td.name())
-                            .append("] 工具结果：").append(res.result());
-                    String stepSnippet = snippet.length() > 60 ? snippet.substring(0, 60) + "…" : snippet;
-                    sendStep(emitter, "MCP 工具返回：" + stepSnippet, "done", "tool");
-                }
-                // 记录 MCP 调用轨迹（入参/出参/状态），满足对话日志铁律
-                ctx.getTrace().add(new CallTrace("tool",
-                        "MCP " + td.name() + " @server#" + serverId + (ok ? " 成功" : " 不可用"),
-                        "done", null, null, td.name(), argsJson, snippet, ok));
-            } catch (Exception e) {
-                // 防御：即便 McpService 契约保证不抛，也兜底降级，绝不让对话崩（§4.5）
-                log.warn("mcp enrich unexpected error serverId={}", serverId, e);
-                toolCtx.append("\n- [MCP server ").append(serverId).append("] 工具暂时不可用");
-                sendStep(emitter, "MCP server #" + serverId + "：工具暂时不可用", "done", "tool");
-                ctx.getTrace().add(new CallTrace("tool",
-                        "MCP server #" + serverId + "：调用异常降级", "done",
-                        null, null, null, null, e.getMessage(), false));
-            }
-        }
-        if (toolCtx.length() == 0) {
-            return ctx;
-        }
-        log.info("mcp.enrich done serverCount={} hasResult={}", toolRefs.size(),
-                toolCtx.indexOf("工具结果") >= 0);
-        List<ChatMessage> msgs = new ArrayList<>(ctx.getMessages());
-        msgs.add(new ChatMessage("system",
-                "以下是可用的外部工具调用结果，请在回答中结合使用：" + toolCtx.toString().strip()));
-        return ctx.withMessages(msgs);
-    }
-
-    /** 把用户问题包成 MCP 工具的入参 JSON（简单占位：作为 msg 字段；真实场景由模型构造）。 */
-    private String buildMcpArgs(String question) {
-        try {
-            var args = objectMapper.createObjectNode();
-            args.put("msg", question == null ? "" : question);
-            return objectMapper.writeValueAsString(args);
-        } catch (Exception e) {
-            log.debug("mcp.buildArgs fallback to empty", e);
-            return "{\"msg\":\"\"}";
-        }
     }
 
     /** 拼最终发给 LLM 的 messages：system(含召回知识) + 历史 + 当前 user 问题。 */
@@ -529,13 +511,15 @@ public class ConversationService {
         return msgs;
     }
 
-    /** 成功结束：回填 assistant 消息内容/状态/厂商/token，并更新会话计数与时间。 */
-    private void finalizeAssistantOk(Long assistantMsgId, Long convId, String full, ChatContext ctx, int outTok) {
+    /** 成功结束：回填 assistant 消息内容/状态/厂商/model/token（输入+输出），并更新会话计数与时间。 */
+    private void finalizeAssistantOk(Long assistantMsgId, Long convId, String full, ChatContext ctx, int inTok, int outTok) {
         messageRepository.findById(assistantMsgId).ifPresent(m -> {
             m.setContent(full);
             m.setStatus(Message.MessageStatus.SENT);
             m.setProvider(ctx.getProviderType());
+            m.setModel(ctx.getModel());
             m.setTokens(outTok);
+            m.setTokensIn(inTok);
             m.setTraceJson(writeTrace(ctx));
             messageRepository.save(m);
         });
@@ -552,6 +536,7 @@ public class ConversationService {
             m.setContent(partial);
             m.setStatus(Message.MessageStatus.FAILED);
             m.setProvider(ctx.getProviderType());
+            m.setModel(ctx.getModel());
             m.setTokens(estimateTokens(partial));
             m.setTraceJson(writeTrace(ctx));
             messageRepository.save(m);
@@ -708,7 +693,12 @@ public class ConversationService {
                 m.getContent(),
                 m.getSeq(),
                 m.getCreatedAt() == null ? null : m.getCreatedAt().toInstant(ZoneOffset.UTC),
-                m.getTraceJson()
+                m.getTraceJson(),
+                m.getTokensIn(),
+                m.getTokens(),
+                m.getProvider(),
+                m.getModel(),
+                null
         );
     }
 

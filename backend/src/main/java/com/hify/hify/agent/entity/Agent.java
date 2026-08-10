@@ -95,4 +95,12 @@ public class Agent extends BaseEntity {
     @Convert(converter = RefsJsonConverter.class)
     @Column(name = "tool_refs", columnDefinition = "text")
     private List<Long> toolRefs = new ArrayList<>();
+
+    /**
+     * 技能引用 id 列表（M8/T4）。复用与 knowledge_refs/tool_refs 完全相同的
+     * {@link RefsJsonConverter}，存于 skill_refs 列；Agent 挂载的技能经 SkillService 校验存在且启用。
+     */
+    @Convert(converter = RefsJsonConverter.class)
+    @Column(name = "skill_refs", columnDefinition = "text")
+    private List<Long> skillRefs = new ArrayList<>();
 }

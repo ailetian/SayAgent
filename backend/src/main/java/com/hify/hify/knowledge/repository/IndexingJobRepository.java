@@ -36,4 +36,9 @@ public interface IndexingJobRepository extends BaseRepository<IndexingJob> {
      * @return 这些文档的全部任务（未去重，调用方按 docId 取最新）
      */
     List<IndexingJob> findByDocIdIn(Collection<Long> docIds);
+
+    /**
+     * 取某库处于指定状态之一的索引任务（删除知识库前把在途任务置 FAILED，防孤儿向量写入，K0808）。
+     */
+    List<IndexingJob> findByKbIdAndStatusIn(Long kbId, Collection<IndexingJob.Status> statuses);
 }

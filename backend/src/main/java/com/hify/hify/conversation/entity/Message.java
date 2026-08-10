@@ -83,6 +83,14 @@ public class Message extends BaseEntity {
     @Column(name = "tokens")
     private Integer tokens;
 
+    /** 本消息消耗的输入 token（K0808 T10；与 conversation_log.in_tok 同源，老消息为 null）。 */
+    @Column(name = "tokens_in")
+    private Integer tokensIn;
+
+    /** 实际模型名（K0808 T11；与 conversation_log.model 同源，user 消息留空）。 */
+    @Column(name = "model", length = 64)
+    private String model;
+
     /** 角色：用户 / 助手。 */
     public enum MessageRole {
         USER, ASSISTANT

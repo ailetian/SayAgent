@@ -127,6 +127,9 @@ class MountServiceTest {
         mountService.unmount(1L, 10L);
 
         verify(linkRepository).delete(link); // 软删（@SQLDelete → deleted=1）
+        // 双源一致：链接表软删的同时，必须把该 kb 从 Agent.knowledgeRefs 字段摘掉，
+        // 否则字段仍指向已卸载的库，聊天检索会继续把它算进去（K0808 暴露的双源脱钩隐患）。
+        verify(agentService).removeKnowledgeRefFromAgent(1L, 10L);
     }
 
     @Test

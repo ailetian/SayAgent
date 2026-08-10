@@ -77,6 +77,13 @@
             :content="m.content"
             :steps="m.steps"
             :streaming="chat.streaming && i === chat.messages.length - 1"
+            :message-id="m.id"
+            :my-rating="m.myRating"
+            :tokens-in="m.tokensIn"
+            :tokens-out="m.tokensOut"
+            :provider="m.provider"
+            :model="m.model"
+            @rate="onFeedback"
           />
 
           <div v-if="!chat.messages.length" class="muted chat-empty">选择 Agent 并开始对话。</div>
@@ -101,6 +108,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import MessageBubble from './chat/MessageBubble.vue'
 import { useChatStore } from '../stores/chat'
+import { feedbackMessage } from '../api/chat'
 
 const chat = useChatStore()
 const draft = ref('')
@@ -207,6 +215,21 @@ function onScroll() {
   atBottom.value = isNearBottom()
   if (scroll.value.scrollTop < 40 && chat.hasMore && !chat.streaming) {
     onLoadEarlier()
+  }
+}
+
+// 消息反馈（T9）：乐观更新气泡高亮，再调接口落库；失败回滚。
+// payload: { messageId, rating: 'THUMBS_UP'|'THUMBS_DOWN'|null, reason }
+async function onFeedback({ messageId, rating, reason }) {
+  if (messageId == null) return
+  const msg = chat.messages.find((m) => m.id === messageId)
+  if (!msg) return
+  const prev = msg.myRating
+  msg.myRating = rating || '' // 乐观更新
+  try {
+    await feedbackMessage(messageId, { rating: rating || null, reason: reason || null })
+  } catch (e) {
+    msg.myRating = prev || '' // 回滚到原状态（拦截器已统一提示）
   }
 }
 

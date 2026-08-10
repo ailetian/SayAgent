@@ -34,6 +34,7 @@ backend/BOOT-INF/
 # ---------- Node / Vue (frontend) ----------
 frontend/node_modules/
 frontend/dist/
+frontend/dist-*/
 frontend/.vite/
 frontend/*.log
 frontend/_dev_*.log

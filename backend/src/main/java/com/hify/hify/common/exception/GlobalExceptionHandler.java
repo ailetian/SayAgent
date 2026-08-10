@@ -45,7 +45,13 @@ public class GlobalExceptionHandler {
             default -> HttpStatus.OK;
         };
         log.warn("biz.exception code={} msg={}", ex.getErrorCode().getCode(), ex.getMessage());
-        return ResponseEntity.status(status).body(Result.fail(ex.getErrorCode()));
+        // 透出异常自定义明细（如「被哪些 Agent 挂载」），而非仅枚举文案（§3.5 统一盒子细节可附）。
+        // 注意：这里必须传 getDetail() 而不是 getMessage()——后者已含枚举文案前缀，
+        // 再交给 Result.fail(ec, detail) 会把前缀拼第二遍（历史 bug：提示重复两段）。
+        Result<Void> body = ex.getDetail() == null
+                ? Result.fail(ex.getErrorCode())
+                : Result.fail(ex.getErrorCode(), ex.getDetail());
+        return ResponseEntity.status(status).body(body);
     }
 
     /**

@@ -73,6 +73,7 @@ public class MountService {
         AgentKbLink link = linkRepository.findByAgentIdAndKbId(agentId, kbId)
                 .orElseThrow(() -> new BizException(ErrorCode.RESOURCE_NOT_FOUND, "该 Agent 未挂载此知识库"));
         linkRepository.delete(link); // 软删（@SQLDelete → deleted=1）
+        agentService.removeKnowledgeRefFromAgent(agentId, kbId); // 同步清字段，消除双源脱钩（K0808）
         log.info("unmount agentId={} kbId={} by={}", agentId, kbId, currentUser());
     }
 

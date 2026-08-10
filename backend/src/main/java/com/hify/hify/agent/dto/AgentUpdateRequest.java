@@ -41,5 +41,7 @@ public record AgentUpdateRequest(
 
         List<Long> knowledgeRefs,
 
-        List<Long> toolRefs) {
+        List<Long> toolRefs,
+
+        List<Long> skillRefs) {
 }

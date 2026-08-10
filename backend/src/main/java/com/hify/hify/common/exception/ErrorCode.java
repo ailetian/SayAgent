@@ -30,6 +30,9 @@ public enum ErrorCode {
     /** MCP Server 不存在（M7 MCP 集成会用到）。 */
     MCP_SERVER_NOT_FOUND(1004, "MCP Server 不存在"),
 
+    /** 知识库被 Agent 挂载中，禁止删除（须先到对应 Agent 卸载，K0808 安全删除）。 */
+    KNOWLEDGE_BASE_IN_USE(1005, "知识库已被 Agent 挂载，请先到对应 Agent 卸载后再删除"),
+
     /** 入参校验失败（Bean Validation 抛出的异常会翻译成它）。 */
     PARAM_INVALID(4000, "参数校验失败"),
 
@@ -83,6 +86,9 @@ public enum ErrorCode {
 
     /** 索引流水线整体失败兜底（K6）：具体死因已记在 indexing_job.error_code 列，UI 精确报"❌ 解析失败：加密 PDF"之类。 */
     INDEXING_JOB_FAILED(5010, "文档索引失败"),
+
+    /** 技能不存在（M8/T4 技能模块：Agent 挂载的技能 id 找不到 / 已禁用 / 已删）。 */
+    SKILL_NOT_FOUND(5011, "技能不存在"),
 
     /** 系统异常兜底：所有没被具体捕获的未知错误都归它。 */
     SYS_ERROR(5000, "系统异常");

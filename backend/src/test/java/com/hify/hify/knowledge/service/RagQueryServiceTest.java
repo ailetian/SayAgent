@@ -8,7 +8,6 @@ import com.hify.hify.knowledge.entity.RetrievalLog;
 import com.hify.hify.knowledge.repository.DocumentChunkRepository;
 import com.hify.hify.knowledge.repository.DocumentRepository;
 import com.hify.hify.knowledge.repository.RetrievalLogRepository;
-import com.hify.hify.knowledge.retriever.RetrievalPort;
 import com.hify.hify.knowledge.retriever.RetrievalResult;
 import com.hify.hify.modelprovider.client.ChatMessage;
 import com.hify.hify.modelprovider.client.LlmResponse;
@@ -17,7 +16,6 @@ import com.hify.hify.modelprovider.client.ProviderConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -44,12 +42,13 @@ import static org.mockito.Mockito.when;
  *
  * <p>覆盖验收点：拒答三型(NO_KB/NO_HIT/BELOW_THRESHOLD)不调 LLM、溯源答案含 [来源i]、
  * Small-to-Big 取邻块、检索日志每次写入含拒答分型+top_candidates、调 LLM 走 M3 ProviderClient。
+ *
+ * <p>注：意图网关（K0808 T2/T3）已接入 query() 顶端——本文件所有用例 query 均为真实问题
+ * （"年假怎么请"等 classify→QUESTION），故照常走检索；意图拦截分支由 RagQueryServiceIntentTest 专测。
  */
 @ExtendWith(MockitoExtension.class)
 class RagQueryServiceTest {
 
-    @Mock
-    private RetrievalPort retrievalPort;
     @Mock
     private DocumentChunkRepository documentChunkRepository;
     @Mock
@@ -58,14 +57,17 @@ class RagQueryServiceTest {
     private ProviderRouter providerRouter;
     @Mock
     private RetrievalLogRepository retrievalLogRepository;
+    @Mock
+    private KbRetrievalService kbRetrievalService;
 
     private RagQueryService ragQueryService;
 
     @org.junit.jupiter.api.BeforeEach
     void init() {
-        // 手动构造：QueryRewriter 用真实实现（验证 R4 端到端），其余依赖全部 mock
-        ragQueryService = new RagQueryService(retrievalPort, new QueryRewriter(),
-                documentChunkRepository, documentRepository, providerRouter, retrievalLogRepository);
+        // 手动构造：QueryRewriter / QueryIntentClassifier 用真实实现（验证 R4 / 意图网关端到端），其余依赖全部 mock
+        ragQueryService = new RagQueryService(new QueryRewriter(),
+                documentChunkRepository, documentRepository, providerRouter, retrievalLogRepository,
+                kbRetrievalService, new QueryIntentClassifier(new QueryRewriter()));
     }
 
     /** 默认 RagConfig：finalTopN=4, contextExpand=1, scoreThreshold=0.6。 */
@@ -88,7 +90,7 @@ class RagQueryServiceTest {
 
         assertTrue(answer.refused());
         assertEquals(RetrievalLog.RefusalReason.NO_KB, answer.refusalReason());
-        verify(retrievalPort, never()).retrieveHybrid(anyString(), anyList(), any());
+        verify(kbRetrievalService, never()).retrieve(any(), any(), any());
         verify(providerRouter, never()).route(any());
 
         ArgumentCaptor<RetrievalLog> captor = ArgumentCaptor.forClass(RetrievalLog.class);
@@ -103,7 +105,7 @@ class RagQueryServiceTest {
 
     @Test
     void retrieveEmpty_returnsNoHit() {
-        when(retrievalPort.retrieveHybrid(anyString(), anyList(), any())).thenReturn(List.of());
+        when(kbRetrievalService.retrieve(any(), any(), any())).thenReturn(List.of());
         RagQueryService.RagQueryRequest request = req(List.of(1L), List.of());
 
         RagQueryService.RagAnswer answer = ragQueryService.query(request);
@@ -123,7 +125,7 @@ class RagQueryServiceTest {
         // FTS-only 命中：semanticScore=0.0 < 0.6 → 阈值拒答（不调 LLM）
         RetrievalResult hit = new RetrievalResult("doc-1", 3, "关键词命中但语义弱", 0.01, 1,
                 RetrievalResult.RetrievalSource.FTS, 0.0);
-        when(retrievalPort.retrieveHybrid(anyString(), anyList(), any())).thenReturn(List.of(hit));
+        when(kbRetrievalService.retrieve(any(), any(), any())).thenReturn(List.of(hit));
         RagQueryService.RagQueryRequest request = req(List.of(1L), List.of());
 
         RagQueryService.RagAnswer answer = ragQueryService.query(request);
@@ -149,7 +151,7 @@ class RagQueryServiceTest {
         // 语义命中：semanticScore=0.8 >= 0.6
         RetrievalResult hit = new RetrievalResult("doc-1", 5, "命中块内容", 0.8, 1,
                 RetrievalResult.RetrievalSource.SEMANTIC, 0.8);
-        when(retrievalPort.retrieveHybrid(anyString(), anyList(), any())).thenReturn(List.of(hit));
+        when(kbRetrievalService.retrieve(any(), any(), any())).thenReturn(List.of(hit));
 
         // R5 Small-to-Big：取 seq 4..6
         DocumentChunkRepository.DocumentChunk before =
@@ -193,7 +195,7 @@ class RagQueryServiceTest {
     void llmCallFails_propagatesLlmCallFailed_andLogs() {
         RetrievalResult hit = new RetrievalResult("doc-1", 5, "命中块内容", 0.8, 1,
                 RetrievalResult.RetrievalSource.SEMANTIC, 0.8);
-        when(retrievalPort.retrieveHybrid(anyString(), anyList(), any())).thenReturn(List.of(hit));
+        when(kbRetrievalService.retrieve(any(), any(), any())).thenReturn(List.of(hit));
         when(documentChunkRepository.findByDocumentIdAndSeqBetween(anyString(), anyInt(), anyInt()))
                 .thenReturn(List.of(new DocumentChunkRepository.DocumentChunk("doc-1", 1L, 5, "命中块内容", null)));
         when(documentRepository.findByDocumentId("doc-1")).thenReturn(Optional.of(new Document()));

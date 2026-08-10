@@ -94,8 +94,11 @@ public class QueryRewriter {
         return stripFiller(cleaned);
     }
 
-    /** 口语清理：循环去头部寒暄，再去尾部客套词与标点。 */
-    private String stripFiller(String text) {
+    /**
+     * 口语清理：循环去头部寒暄，再去尾部客套词与标点。
+     * 包级可见，供同包 {@code QueryIntentClassifier} 复用（K0808 T2，避免重复实现 cleaning 逻辑）。
+     */
+    String stripFiller(String text) {
         String t = text;
         String prev;
         do {

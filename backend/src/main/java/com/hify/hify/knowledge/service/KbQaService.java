@@ -1,12 +1,10 @@
 package com.hify.hify.knowledge.service;
 
 import com.hify.hify.knowledge.config.RagConfig;
-import com.hify.hify.knowledge.config.RagProperties;
 import com.hify.hify.knowledge.entity.KnowledgeBase;
 import com.hify.hify.knowledge.entity.RetrievalLog;
 import com.hify.hify.knowledge.repository.RetrievalLogRepository;
 import com.hify.hify.knowledge.eval.EvalRunner;
-import com.hify.hify.knowledge.retriever.RetrievalPort;
 import com.hify.hify.knowledge.retriever.RetrievalResult;
 import com.hify.hify.knowledge.web.AskResponse;
 import com.hify.hify.knowledge.web.EvalRequest;
@@ -33,28 +31,25 @@ import java.util.List;
 @Service
 public class KbQaService {
 
-    private final RetrievalPort retrievalPort;
     private final RagQueryService ragQueryService;
-    private final RagProperties ragProperties;
     private final ProviderRouter providerRouter;
     private final RetrievalLogRepository retrievalLogRepository;
     private final KbAccessGuard accessGuard;
     private final EvalRunner evalRunner;
+    private final KbRetrievalService kbRetrievalService;
 
-    public KbQaService(RetrievalPort retrievalPort,
-                       RagQueryService ragQueryService,
-                       RagProperties ragProperties,
+    public KbQaService(RagQueryService ragQueryService,
                        ProviderRouter providerRouter,
                        RetrievalLogRepository retrievalLogRepository,
                        KbAccessGuard accessGuard,
-                       EvalRunner evalRunner) {
-        this.retrievalPort = retrievalPort;
+                       EvalRunner evalRunner,
+                       KbRetrievalService kbRetrievalService) {
         this.ragQueryService = ragQueryService;
-        this.ragProperties = ragProperties;
         this.providerRouter = providerRouter;
         this.retrievalLogRepository = retrievalLogRepository;
         this.accessGuard = accessGuard;
         this.evalRunner = evalRunner;
+        this.kbRetrievalService = kbRetrievalService;
     }
 
     /**
@@ -66,7 +61,7 @@ public class KbQaService {
     public AskResponse ask(Long kbId, String query, List<ChatMessage> history) {
         KnowledgeBase kb = accessGuard.requireAccessible(kbId);
         RagQueryService.RagAnswer answer = ragQueryService.query(new RagQueryService.RagQueryRequest(
-                query, history, List.of(kbId), null, effectiveConfig(kb), defaultProvider(), kbId));
+                query, history, List.of(kbId), null, kbRetrievalService.effectiveConfig(kb), defaultProvider(), kbId));
         List<AskResponse.AskSource> sources = answer.sources() == null ? List.of() :
                 answer.sources().stream()
                         .map(s -> new AskResponse.AskSource(s.index(), s.documentId(), s.seq(), s.title()))
@@ -84,8 +79,8 @@ public class KbQaService {
      */
     public ProbeResultVO probe(Long kbId, String query) {
         KnowledgeBase kb = accessGuard.requireAccessible(kbId);
-        RagConfig ragConfig = effectiveConfig(kb);
-        List<RetrievalResult> results = retrievalPort.retrieveHybrid(query, List.of(kbId), ragConfig);
+        List<RetrievalResult> results = kbRetrievalService.retrieve(kbId, query);
+        RagConfig ragConfig = kbRetrievalService.effectiveConfig(kb);
         double threshold = ragConfig.scoreThreshold();
         double topScore = results.stream().mapToDouble(RetrievalResult::semanticScore).max().orElse(0.0);
         boolean hit = !results.isEmpty() && topScore >= threshold;
@@ -107,7 +102,7 @@ public class KbQaService {
      */
     public EvalResultVO eval(Long kbId, List<EvalRequest.EvalQuestion> questions) {
         KnowledgeBase kb = accessGuard.requireAccessible(kbId);
-        RagConfig ragConfig = effectiveConfig(kb);
+        RagConfig ragConfig = kbRetrievalService.effectiveConfig(kb);
         ProviderConfig providerConfig = defaultProvider();
 
         int total = questions.size();
@@ -146,11 +141,6 @@ public class KbQaService {
      */
     public EvalRunner.EvalReport runFullEval(Long kbId) {
         return evalRunner.run(kbId);
-    }
-
-    /** 库级参数覆盖全局兜底（K2：库没配就吃 application.yml 的默认值）。 */
-    private RagConfig effectiveConfig(KnowledgeBase kb) {
-        return kb.getEffectiveConfig(RagConfig.fromGlobal(ragProperties));
     }
 
     /** 默认聊天模型配置（走 T2 ProviderRouter，不在知识库模块里硬编码任何秘钥）。 */

@@ -60,7 +60,7 @@
           </div>
           <div style="margin-top:16px">
             <button class="btn-grad" :disabled="saving" @click="saveSettings">{{ saving ? '保存中…' : '保存' }}</button>
-            <button class="btn-ghost" style="margin-left:8px" :disabled="saving" @click="archive">删除知识库</button>
+            <button class="btn-ghost" style="margin-left:8px" :disabled="saving" @click="delVisible = true">删除知识库</button>
           </div>
           <div v-if="settingsNote" class="settings-note">{{ settingsNote }}</div>
           <p v-if="settingsError" class="error-text" style="margin-top:12px">{{ settingsError }}</p>
@@ -80,6 +80,9 @@
         <ProbeConsole :kb-id="kbId" />
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 删除确认弹窗：被 Agent 挂载时明确列出挂载方，不直接卸载 -->
+    <DeleteKbModal :visible="delVisible" :kb="kb || { id: kbId }" @update:visible="delVisible = $event" @deleted="onDeleted" />
   </div>
 </template>
 
@@ -87,11 +90,12 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
-import { askKb, listBases, updateBase, deleteBase } from '../api/knowledge'
+import { askKb, listBases, updateBase } from '../api/knowledge'
 import UploadPanel from '../components/UploadPanel.vue'
 import DocumentList from '../components/DocumentList.vue'
 import HealthBoard from '../components/HealthBoard.vue'
 import ProbeConsole from '../components/ProbeConsole.vue'
+import DeleteKbModal from '../components/DeleteKbModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -112,6 +116,7 @@ const edit = reactive({ name: '', description: '', similarityThreshold: null, ch
 const settingsNote = ref('')
 const settingsError = ref('')
 const saving = ref(false)
+const delVisible = ref(false)
 
 const md = new MarkdownIt()
 
@@ -168,20 +173,9 @@ async function saveSettings() {
   }
 }
 
-// 删除知识库（K11 DELETE /api/knowledge/bases/{id}）：软删库 + 级联软删文档 + 清 PG 切片
-async function archive() {
-  if (!window.confirm(`确认删除知识库「${(kb.value && kb.value.name) || kbId.value}」？其下文档将一并软删，且不再被任何 Agent 召回。`)) return
-  saving.value = true
-  settingsError.value = ''
-  settingsNote.value = ''
-  try {
-    await deleteBase(kbId.value)
-    router.push('/knowledge')
-  } catch (e) {
-    settingsError.value = e.message || '删除失败'
-  } finally {
-    saving.value = false
-  }
+// 删除知识库：交给 DeleteKbModal 处理（被 Agent 挂载时弹窗列出挂载方，不直接卸载）
+function onDeleted() {
+  router.push('/knowledge')
 }
 
 onMounted(async () => {

@@ -27,9 +27,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class McpServerServiceImpl implements McpServerService {
 
-    /** 启用状态值（与 DDL `status TINYINT DEFAULT 1` 对齐，§7.2 规则7 禁魔法值）。 */
-    private static final int STATUS_ENABLED = 1;
-
     private final McpServerRepository repository;
 
     /** 列出全部 MCP Server（软删除已由 @SQLRestriction 过滤）。 */
@@ -54,7 +51,7 @@ public class McpServerServiceImpl implements McpServerService {
         s.setName(req.name());
         s.setAddress(req.address());
         s.setType(req.type());
-        s.setStatus(req.status() != null ? req.status() : STATUS_ENABLED);
+        s.setStatus(req.status() != null ? req.status() : McpServerStatus.ENABLED);
         return McpServerVO.from(repository.save(s));
     }
 

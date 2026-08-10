@@ -28,8 +28,12 @@ public class ChatContext {
     private final String model;
     private final List<Long> knowledgeRefs;
     private final List<Long> toolRefs;
+    private final List<Long> skillRefs;
     private final String question;
     private final List<ChatMessage> history;
+
+    /** 意图网关标记：本次是否因非 QUESTION 意图（问候/问身份/无意义/动作占位）而跳过知识库检索。 */
+    private boolean kbRetrievalSkipped = false;
 
     private String retrievedKnowledge = "";
     private List<ChatMessage> messages = List.of();
@@ -48,6 +52,7 @@ public class ChatContext {
         this.model = b.model;
         this.knowledgeRefs = b.knowledgeRefs;
         this.toolRefs = b.toolRefs;
+        this.skillRefs = b.skillRefs;
         this.question = b.question;
         this.history = b.history;
     }
@@ -100,6 +105,10 @@ public class ChatContext {
         return toolRefs;
     }
 
+    public List<Long> getSkillRefs() {
+        return skillRefs;
+    }
+
     public String getQuestion() {
         return question;
     }
@@ -133,6 +142,17 @@ public class ChatContext {
         return this;
     }
 
+    /** 意图网关标记：本次是否跳过了知识库检索（非 QUESTION 意图）。 */
+    public boolean isKbRetrievalSkipped() {
+        return kbRetrievalSkipped;
+    }
+
+    /** 设置意图网关跳过检索标记（仅当意图非 QUESTION 且 Agent 挂载了知识库时为 true）。 */
+    public ChatContext withKbRetrievalSkipped(boolean kbRetrievalSkipped) {
+        this.kbRetrievalSkipped = kbRetrievalSkipped;
+        return this;
+    }
+
     public static class Builder {
         private Long userId;
         private String conversationId;
@@ -145,6 +165,7 @@ public class ChatContext {
         private String model;
         private List<Long> knowledgeRefs = List.of();
         private List<Long> toolRefs = List.of();
+        private List<Long> skillRefs = List.of();
         private String question;
         private List<ChatMessage> history = List.of();
 
@@ -200,6 +221,11 @@ public class ChatContext {
 
         public Builder toolRefs(List<Long> v) {
             this.toolRefs = v;
+            return this;
+        }
+
+        public Builder skillRefs(List<Long> v) {
+            this.skillRefs = v;
             return this;
         }
 

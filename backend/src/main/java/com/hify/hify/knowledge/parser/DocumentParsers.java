@@ -18,7 +18,8 @@ public final class DocumentParsers {
             DocType.TXT, new TextParser(),
             DocType.MD, new MarkdownParser(),
             DocType.PDF, new TikaPdfParser(),
-            DocType.DOCX, new TikaDocxParser());
+            DocType.DOCX, new TikaDocxParser(),
+            DocType.DOC, new TikaDocParser());
 
     private DocumentParsers() {
     }
@@ -55,6 +56,9 @@ public final class DocumentParsers {
         }
         if (lower.endsWith(".docx")) {
             return DocType.DOCX;
+        }
+        if (lower.endsWith(".doc")) {
+            return DocType.DOC;
         }
         throw new BizException(ErrorCode.UNSUPPORTED_FILE_TYPE, filename);
     }

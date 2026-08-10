@@ -66,6 +66,16 @@ export function uploadDoc(payload) {
   return kbRequest.post('/knowledge/upload', payload)
 }
 
+// 二进制文件批量上传（PDF/DOCX/MD/TXT）：FormData 原样传文件字节，后端用 Tika 解析
+// 注意：不要手动设 Content-Type: multipart/form-data —— 浏览器/XHR 不会自动补 boundary，
+// 会导致服务端解析不到文件而报「系统异常」、文档建不出来（见知识库上传空列表问题）。
+// 交给 axios：传 FormData 且未显式设 Content-Type 时，浏览器会自动带上正确的 boundary。
+export function uploadFiles(kbId, files) {
+  const form = new FormData()
+  files.forEach((f) => form.append('files', f))
+  return kbRequest.post(`/knowledge/${kbId}/upload-files`, form)
+}
+
 // 问答（带源 + 阈值拒答，K8 编排 K5）：{ refused, answer, refusalReason, topScore, threshold, sources }
 export function askKb(kbId, payload) {
   return kbRequest.post(`/knowledge/${kbId}/ask`, payload)
@@ -117,6 +127,18 @@ export function listDocuments(kbId, params = {}) {
 // 删除文档（K11）：软删文档 + 清 PG 切片，孤儿 chunk 不再召回
 export function deleteDocument(kbId, documentId) {
   return kbRequest.delete(`/knowledge/${kbId}/documents/${documentId}`)
+}
+
+// 查看/下载源文档（返回 Blob）：FILE 落盘字节 → 原始文件（PDF 内联预览）；否则回退原文文本
+export function getDocumentSource(kbId, documentId) {
+  return kbRequest.get(`/knowledge/${kbId}/documents/${documentId}/source`, {
+    responseType: 'blob'
+  })
+}
+
+// 列出某文档入库后的全部切片（按 seq 升序），供「切片预览」面板
+export function getDocumentChunks(kbId, documentId) {
+  return kbRequest.get(`/knowledge/${kbId}/documents/${documentId}/chunks`)
 }
 
 // 重新上传 / 更新同一篇文档（K11）：走单文档上传接口并透传 documentId，

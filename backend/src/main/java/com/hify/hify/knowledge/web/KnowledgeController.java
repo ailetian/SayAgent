@@ -15,6 +15,7 @@ import com.hify.hify.knowledge.service.MountService;
 import com.hify.hify.knowledge.web.DocumentSummaryVO;
 import com.hify.hify.knowledge.web.IndexingJobVO;
 import com.hify.hify.knowledge.web.KnowledgeBaseUpdateRequest;
+import com.hify.hify.knowledge.web.ChunkVO;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +26,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 
@@ -139,6 +144,38 @@ public class KnowledgeController {
     }
 
     /**
+     * 二进制文件批量上传（PDF/DOCX/MD/TXT）：接收真实文件字节，后端用 Tika 解析后走索引流水线。
+     *
+     * <p>大白话：与 {@code /{kbId}/upload}（JSON 传文本）不同，这里是真·文件上传——
+     * 前端把选中的文件（含 PDF/DOCX）原样以 multipart 二进制发来，后端解析成文本再入库，
+     * 解决此前「只能传 txt/md、PDF/DOCX 读成乱码」的问题。
+     */
+    @PostMapping("/{kbId}/upload-files")
+    public Result<UploadResponse> uploadFiles(@PathVariable Long kbId,
+                                              @RequestParam("files") List<MultipartFile> files) {
+        if (files == null || files.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "上传文件列表不能为空");
+        }
+        if (files.size() > 10) {
+            throw new BizException(ErrorCode.UPLOAD_TOO_MANY, "单次最多上传 10 个文件");
+        }
+        for (MultipartFile f : files) {
+            String name = f.getOriginalFilename();
+            if (f.getSize() > 20L * 1024 * 1024) {
+                throw new BizException(ErrorCode.FILE_TOO_LARGE, "单文件超过 20MB 上限：" + name);
+            }
+            if (name == null || !isAllowedExtLocal(name)) {
+                throw new BizException(ErrorCode.UNSUPPORTED_FILE_TYPE, name);
+            }
+        }
+        List<String> docIds = knowledgeService.uploadFiles(kbId, files);
+        List<UploadResponse.UploadItemResult> results = docIds.stream()
+                .map(id -> new UploadResponse.UploadItemResult(id, knowledgeService.getDocumentStatus(id)))
+                .toList();
+        return Result.ok(new UploadResponse(results));
+    }
+
+    /**
      * 文档列表（K11 / K9 缺口①）：某知识库下的文档（keyset 游标分页），供文档管理页与「重新上传」按钮。
      */
     @GetMapping("/{kbId}/documents")
@@ -155,6 +192,23 @@ public class KnowledgeController {
     public Result<Void> deleteDocument(@PathVariable Long kbId, @PathVariable String documentId) {
         knowledgeService.deleteDocument(kbId, documentId);
         return Result.ok();
+    }
+
+    /**
+     * 查看/下载源文档：FILE 且有落盘字节 → 流式返回原始文件（PDF 内联预览，其余附件下载）；
+     * 无二进制源（TEXT / 旧上传）→ 回退返回 rawContent 文本。供前端「查看源文档」按钮。
+     */
+    @GetMapping("/{kbId}/documents/{documentId}/source")
+    public ResponseEntity<Resource> getDocumentSource(@PathVariable Long kbId, @PathVariable String documentId) {
+        return knowledgeService.getSource(kbId, documentId);
+    }
+
+    /**
+     * 列出某文档入库后的全部切片（按 seq 升序），供前端「切片预览」面板直接查看被切成哪几段。
+     */
+    @GetMapping("/{kbId}/documents/{documentId}/chunks")
+    public Result<List<ChunkVO>> getDocumentChunks(@PathVariable Long kbId, @PathVariable String documentId) {
+        return Result.ok(knowledgeService.getDocumentChunks(kbId, documentId));
     }
 
     /**
@@ -263,9 +317,9 @@ public class KnowledgeController {
         return Result.ok();
     }
 
-    /** 上传白名单校验（与 T3 同源，FILE 必须有合法后缀）。 */
+    /** 上传白名单校验（与 KnowledgeService.ALLOWED_EXT 同源，FILE 必须有合法后缀，含老 .doc）。 */
     private static boolean isAllowedExtLocal(String filename) {
         String lower = filename.toLowerCase();
-        return List.of(".txt", ".md", ".pdf").stream().anyMatch(lower::endsWith);
+        return List.of(".txt", ".md", ".pdf", ".docx", ".doc").stream().anyMatch(lower::endsWith);
     }
 }

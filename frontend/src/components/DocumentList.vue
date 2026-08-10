@@ -17,10 +17,26 @@
         <span class="dl-name">{{ d.title || d.docId }}</span>
         <span class="muted dl-meta">{{ d.chunkCount }} 切片 · {{ fmtSize(d.sizeBytes) }} · {{ fmtTime(d.updatedAt) }}</span>
         <span class="dl-spacer" />
+        <button class="link-a" :disabled="busyId === d.docId" @click="viewSource(d)">查看源文档</button>
+        <button class="link-a" :disabled="busyId === d.docId" @click="toggleChunks(d)">切片预览</button>
         <button class="link-a" :disabled="busyId === d.docId" @click="openReupload(d)">重新上传</button>
         <button class="link-danger" :disabled="busyId === d.docId" @click="removeDoc(d)">删除</button>
       </div>
       <div class="muted dl-id">docId {{ d.docId }}</div>
+
+      <!-- 切片预览：直接看该文档被切成了哪几段（按 seq） -->
+      <div v-if="previewId === d.docId" class="dl-chunks glass">
+        <div class="dl-chunks-head">
+          <span class="muted">切片预览（共 {{ chunks.length }} 段，按入库顺序）</span>
+          <button class="link-a" @click="previewId = ''">收起</button>
+        </div>
+        <div v-if="chunksLoading" class="muted dl-chunks-empty">加载切片中…</div>
+        <div v-else-if="!chunks.length" class="muted dl-chunks-empty">该文档暂无切片（可能尚未索引成功或解析后无正文）。</div>
+        <div v-for="(c, i) in chunks" :key="i" class="dl-chunk">
+          <div class="dl-chunk-meta"><span class="tag tag-b">#{{ c.chunkIndex }}</span><span class="muted">长度 {{ (c.content || '').length }}</span></div>
+          <pre class="dl-chunk-text">{{ c.content }}</pre>
+        </div>
+      </div>
 
       <!-- 重新上传：复用同一 documentId，后端撕旧切片贴新切片 -->
       <div v-if="reuploadId === d.docId" class="dl-reupload glass">
@@ -79,7 +95,9 @@ import {
   deleteDocument,
   reuploadDoc,
   getIndexingJob,
-  retryIndexingJob
+  retryIndexingJob,
+  getDocumentSource,
+  getDocumentChunks
 } from '../api/knowledge'
 
 const props = defineProps({ kbId: { type: [Number, String], required: true } })
@@ -95,6 +113,11 @@ const busyId = ref('')
 const reuploadId = ref('')
 const ruName = ref('')
 const ruContent = ref('')
+
+// 切片预览态
+const previewId = ref('')
+const chunks = ref([])
+const chunksLoading = ref(false)
 
 // docId -> IndexingJobVO；轮询定时器
 const jobs = ref({})
@@ -140,6 +163,55 @@ function closeReupload() {
   reuploadId.value = ''
   ruName.value = ''
   ruContent.value = ''
+}
+
+// 查看源文档：走鉴权请求拿 Blob，PDF 新标签内联预览，其余触发下载
+async function viewSource(d) {
+  busyId.value = d.docId
+  error.value = ''
+  try {
+    const blob = await getDocumentSource(props.kbId, d.docId)
+    const url = URL.createObjectURL(blob)
+    const isPdf = (blob.type || '').includes('pdf')
+    if (isPdf) {
+      window.open(url, '_blank')
+    } else {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = (d.title || 'document') + (extFromName(d.title) || '.txt')
+      a.click()
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  } catch (e) {
+    error.value = e.message || '查看源文档失败'
+  } finally {
+    busyId.value = ''
+  }
+}
+
+// 切片预览：展开/收起该文档的全部切片
+async function toggleChunks(d) {
+  if (previewId.value === d.docId) {
+    previewId.value = ''
+    return
+  }
+  previewId.value = d.docId
+  chunks.value = []
+  chunksLoading.value = true
+  error.value = ''
+  try {
+    chunks.value = await getDocumentChunks(props.kbId, d.docId)
+  } catch (e) {
+    error.value = e.message || '加载切片失败'
+  } finally {
+    chunksLoading.value = false
+  }
+}
+
+function extFromName(name) {
+  if (!name) return ''
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.substring(dot) : ''
 }
 
 function onFile(e) {
@@ -267,4 +339,10 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer) })
 .dl-ru-btns { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .dl-job { margin-top: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .dl-more { margin-top: 10px; }
+.dl-chunks { margin-top: 10px; padding: 12px 14px; }
+.dl-chunks-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dl-chunks-empty { padding: 8px 2px; font-size: 13px; }
+.dl-chunk { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--glass-strong); }
+.dl-chunk-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.dl-chunk-text { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.5; max-height: 220px; overflow: auto; color: var(--text); }
 </style>

@@ -86,4 +86,53 @@ public class DocumentChunkerTest {
         }
         return sb.toString();
     }
+
+    // ===================== T1（K0808）：小数点/版本号误切修复 =====================
+
+    @Test
+    public void testDecimal_3_5_notSplit() {
+        // 3.5 是小数，不能在小数点切断成 "3." + "5秒"
+        String text = "系统延迟3.5秒后自动重试";
+        List<Chunk> chunks = chunker.chunk(text, ChunkStrategy.RECURSIVE, K3TestSupport.ragConfig(800, 120));
+        assertEquals(1, chunks.size(), "3.5 不应在小数点切断");
+        assertEquals("系统延迟3.5秒后自动重试", chunks.get(0).content());
+    }
+
+    @Test
+    public void testDecimal_version_notSplit() {
+        // v1.0.3 是版本号，不能在任意小数点切断
+        String text = "请升级到 v1.0.3 版本后重试";
+        List<Chunk> chunks = chunker.chunk(text, ChunkStrategy.RECURSIVE, K3TestSupport.ragConfig(800, 120));
+        assertEquals(1, chunks.size(), "v1.0.3 不应在小数点切断");
+        assertEquals("请升级到 v1.0.3 版本后重试", chunks.get(0).content());
+    }
+
+    @Test
+    public void testDecimal_section_notSplit() {
+        // 第4.2节：小数点夹在中文里，仍属同一表述
+        String text = "详见第4.2节说明中的注意事项";
+        List<Chunk> chunks = chunker.chunk(text, ChunkStrategy.RECURSIVE, K3TestSupport.ragConfig(800, 120));
+        assertEquals(1, chunks.size(), "第4.2节 不应在小数点切断");
+        assertEquals("详见第4.2节说明中的注意事项", chunks.get(0).content());
+    }
+
+    @Test
+    public void testCjkPeriod_splitIntoTwo() {
+        // 正常中文句号仍应切成 2 段（小切块强制句级分块）
+        String text = "年假最多可请15天。事假需提前一天申请。";
+        List<Chunk> chunks = chunker.chunk(text, ChunkStrategy.RECURSIVE, K3TestSupport.ragConfig(10, 0));
+        assertEquals(2, chunks.size(), "应按 。 切成 2 段");
+        assertEquals("年假最多可请15天。", chunks.get(0).content());
+        assertEquals("事假需提前一天申请。", chunks.get(1).content());
+    }
+
+    @Test
+    public void testEnglishDecimal_404_notCut() {
+        // 含数字 404 的中文句仍按 。 切，且数字不被切断
+        String text = "HTTP 404 表示未找到。HTTPS 是加密协议。";
+        List<Chunk> chunks = chunker.chunk(text, ChunkStrategy.RECURSIVE, K3TestSupport.ragConfig(10, 0));
+        assertEquals(2, chunks.size(), "应按 。 切成 2 段");
+        assertEquals("HTTP 404 表示未找到。", chunks.get(0).content());
+        assertEquals("HTTPS 是加密协议。", chunks.get(1).content());
+    }
 }

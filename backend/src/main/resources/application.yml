@@ -7,6 +7,11 @@ spring:
   # §5.2 优雅停机各阶段最大等待（默认 30s），给在飞 LLM/SSE 请求留足时间完成再退
   lifecycle:
     timeout-per-shutdown-phase: 30s
+  # ===== 二进制文件上传（PDF/DOCX 等，K 系列知识库上传打通用）=====
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
   # ===== 业务主库 MySQL（Flyway 默认管这个，JPA 也用这个 @Primary 数据源）=====
   datasource:
     url: jdbc:mysql://localhost:3306/hify?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
