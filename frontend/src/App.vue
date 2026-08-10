@@ -5,7 +5,7 @@
       <el-aside class="app-aside" width="232px">
         <div class="app-logo">
           <span class="logo-mark" />
-          <span>Hify</span>
+          <span>SayAgent</span>
         </div>
         <nav class="app-nav">
           <router-link
@@ -60,7 +60,7 @@ const auth = useAuthStore()
 // 登录校验交给 router 守卫处理（未登录访问受保护页会跳 /login），与壳渲染解耦。
 const showChrome = computed(() => route.name !== 'login')
 const activeMenu = computed(() => '/' + (route.path.split('/')[1] || ''))
-const currentTitle = computed(() => route.meta.title || 'Hify')
+const currentTitle = computed(() => route.meta.title || 'SayAgent')
 const initial = computed(() => (auth.user?.username || '?').charAt(0).toUpperCase())
 
 const nav = [

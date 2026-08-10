@@ -1,6 +1,6 @@
-# AGENTS.md — Hify 项目规则唯一入口
+# AGENTS.md — SayAgent 项目规则唯一入口
 
-> **项目规则访问入口（重要）**：本文件（AGENTS.md）是 Hify 项目**所有"规则类"约束的唯一入口与单一事实源**（编码 / 数据库 / LLM 调用 / 部署 / 性能等业务规则均在此）。
+> **项目规则访问入口（重要）**：本文件（AGENTS.md）是 SayAgent 项目**所有"规则类"约束的唯一入口与单一事实源**（编码 / 数据库 / LLM 调用 / 部署 / 性能等业务规则均在此）。
 > - **以后修改任何项目规则，只修改本文件 AGENTS.md**，不要将规则散落到 `01`~`09` 设计文档中。
 > - `01_功能需求文档.md` ~ `09_数据库性能规范.md` 是**设计 / 说明文档**（记录"为什么这么定"的背景与结论），**不是规则文件**；若从设计文档提炼出新的硬性约束，请汇总进本文件，保持规则单一收口。
 > - 你是本项目的 AI 编码助手：生成或修改任何代码、建表、写配置前，**必须先读本节并严格遵守**。
@@ -13,7 +13,7 @@
 
 ## 1. 项目概览
 
-- **一句话定位**：Hify 是「给团队自己用的 AI 员工制造厂」——一人搭建平台，团队内 20–50 人都能拥有"懂公司文档 + 能操作公司系统"的 AI 助手。
+- **一句话定位**：SayAgent 是「给团队自己用的 AI 员工制造厂」——一人搭建平台，团队内 20–50 人都能拥有"懂公司文档 + 能操作公司系统"的 AI 助手。
 - **核心目标**（开发者 2026-07-20 确认）：
   1. **练出全栈 AI 平台真本事**（LLM 治理 / RAG / Agent / MCP / 流式 / 部署全链路）；
   2. **完全自主可控**（代码、数据、模型皆在自手，不绑定外部 SaaS 能力边界）；
@@ -62,7 +62,7 @@ hify/
 
 ```
 com.hify.hify
-├── HifyApplication.java
+├── SayAgentApplication.java
 ├── common/            # 共享内核，禁止反向依赖业务包
 │   ├── config/        # CorsConfig, AsyncConfig(线程池), SwaggerConfig, RedisConfig, JpaConfig
 │   ├── security/      # SecurityConfig, JwtUtil, AuthFilter, CustomUserDetailsService
@@ -259,7 +259,7 @@ public OkHttpClient standardLlmClient() {
 |---|---|---|
 | Nginx(Ingress) | K8s Ingress | HTTPS 终结、路由 `/api/*`→后端 `/`→前端、放宽 SSE 超时 |
 | Vue 前端 | 静态构建物 | 配置页 + 聊天 UI，纯静态 |
-| Hify 后端 | Deployment 无状态 2 副本 | 全部业务能力 + 调外部 LLM + Resilience4j |
+| SayAgent 后端 | Deployment 无状态 2 副本 | 全部业务能力 + 调外部 LLM + Resilience4j |
 | MySQL | StatefulSet/RDS | 业务主库（用户/Agent/模型/对话/知识元数据/工作流） |
 | Redis | StatefulSet | 缓存配置、限流计数、SSE 会话/发布订阅 |
 | pgvector(PostgreSQL) | 与 MySQL 并存 | 向量存储（文档 embedding、相似检索） |
@@ -495,7 +495,7 @@ CREATE TABLE knowledge_chunk (
 
 | 序号 | 触发关键词 / 场景 | 一句话结论 | 去读 |
 |---|---|---|---|
-| K1 | `ClassNotFoundException: com.hify.hify.HifyApplication` 且工程路径含中文、正在用 `mvn spring-boot:run` | 子 JVM `sun.jnu.encoding=GBK` 解错中文 `-cp`；改用 `java -jar` | `rule/坑位库.md#k1-windows-中文路径下-mvn-spring-bootrun-失败` |
+| K1 | `ClassNotFoundException: com.hify.hify.SayAgentApplication` 且工程路径含中文、正在用 `mvn spring-boot:run` | 子 JVM `sun.jnu.encoding=GBK` 解错中文 `-cp`；改用 `java -jar` | `rule/坑位库.md#k1-windows-中文路径下-mvn-spring-bootrun-失败` |
 | K2 | PowerShell 执行 `java -Dfile.encoding=UTF-8 -jar ...` 报「找不到或无法加载主类 .encoding=UTF-8」 | `-D` 参数被 PowerShell 解析器吞掉；加 `--%`、用 `& java '-D...'` 或改用 cmd | `rule/坑位库.md#k2-powershell-中-java--dxxx-yyy--jar-的--d-参数被吞掉` |
 | K3 | 发消息后新消息在滚动区外、需手动拖滚动条才能看到最新；`scrollTop=scrollHeight` 设了无效 | flex 滚动容器缺 `min-height:0`（overflow 不生效）；加 `min-height:0` + ResizeObserver 跟随 + 底部守卫 | `rule/坑位库.md#k3-前端-flex-滚动容器缺-min-height0--不自动跟随--overflow-不生效` |
 | K4 | 登录后多个页面接口全部 `timeout of 15000ms exceeded`、对话/历史不加载 | 多个后端进程抢同一端口、一个「监听不服务」把请求挂到超时；先 `curl` 直连后端端口确认、再杀重复进程单实例启动 | `rule/坑位库.md#k4-后端重复实例抢同一端口--前端整页-15s-超时-端口监听但不服务` |

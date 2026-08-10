@@ -1,4 +1,4 @@
-# Hify 本地中间件：MySQL(业务库) / Redis(缓存) / pgvector(向量库)
+# SayAgent 本地中间件：MySQL(业务库) / Redis(缓存) / pgvector(向量库)
 # 大白话：一条命令拉起三个"仓库"，应用通过 application.yml 连它们。
 # 启动：docker compose up -d   查看：docker compose ps（三容器均 healthy 即过关）
 

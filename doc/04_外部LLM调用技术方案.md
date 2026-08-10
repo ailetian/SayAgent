@@ -1,6 +1,6 @@
-# Hify 外部 LLM 调用技术方案
+# SayAgent 外部 LLM 调用技术方案
 
-> 背景：Hify 需调用多个外部 LLM API（OpenAI / Claude / Gemini / Ollama），这些调用慢且不稳定。
+> 背景：SayAgent 需调用多个外部 LLM API（OpenAI / Claude / Gemini / Ollama），这些调用慢且不稳定。
 > 目标：从线程管理、容错、超时、重试四个维度给出完整技术方案，支撑 50 人 → 几千人扩缩。
 > 文档版本：v1.0
 > 日期：2026-07-19

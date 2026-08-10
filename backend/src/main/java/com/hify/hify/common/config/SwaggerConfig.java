@@ -20,7 +20,7 @@ public class SwaggerConfig {
     public OpenAPI hifyOpenApi() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("Hify API")
+                        .title("SayAgent API")
                         .description("给团队自己用的 AI 员工制造厂 —— 后端接口文档")
                         .version("v0.1"));
     }

@@ -1,4 +1,4 @@
-# Hify Redis（缓存 / token / SSE 会话）StatefulSet + Service + PVC
+# SayAgent Redis（缓存 / token / SSE 会话）StatefulSet + Service + PVC
 # 依据：AGENTS.md §5.1 / §5.2(持久化)；§8 Redis AOF 持久化（--appendonly yes）；镜像与 M1/T2 一致(redis:7)
 apiVersion: apps/v1
 kind: StatefulSet

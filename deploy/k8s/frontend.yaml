@@ -1,4 +1,4 @@
-# Hify 前端静态 Deployment + Service（K8s 内前端）
+# SayAgent 前端静态 Deployment + Service（K8s 内前端）
 # 依据：T4 验收点 5「k8s 含前端」+ 00_概述「K8s 用同一思路或独立前端 Deployment」
 # 说明：T4 交付物清单的 k8s 文件未列 frontend.yaml，但验收点 5 要求 k8s 栈包含前端，
 #       且模块概述明确允许「独立前端 Deployment」，故透明补此文件使全栈 k8s 完整可验。

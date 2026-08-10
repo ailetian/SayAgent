@@ -1,4 +1,4 @@
-# Hify MySQL（业务主库）StatefulSet + Service + PVC
+# SayAgent MySQL（业务主库）StatefulSet + Service + PVC
 # 依据：AGENTS.md §5.1(MySQL 组件) / §5.2(持久化 PVC)；镜像与 M1/T2 本地 compose 一致(mysql:8.0)
 apiVersion: apps/v1
 kind: StatefulSet

@@ -67,7 +67,7 @@
         </div>
         <div class="span-2">
           <label class="form-label">系统提示词 (system prompt)</label>
-          <div class="field"><textarea v-model="form.systemPrompt" placeholder="你是 Hify 的 AI 员工，负责……" style="min-height:110px" /></div>
+          <div class="field"><textarea v-model="form.systemPrompt" placeholder="你是 SayAgent 的 AI 员工，负责……" style="min-height:110px" /></div>
         </div>
         <div>
           <label class="form-label">温度 temperature</label>

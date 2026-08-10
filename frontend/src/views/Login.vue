@@ -9,7 +9,7 @@
           <circle cx="16" cy="16" r="13" stroke="#5EEAD4" stroke-width="2" />
           <path d="M10 20 L16 9 L22 20" stroke="#FFB454" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
-        <span class="name">Hify</span>
+        <span class="name">SayAgent</span>
       </div>
       <p class="tag">AI 员工制造厂 · 登录你的工作台</p>
 

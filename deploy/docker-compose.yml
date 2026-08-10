@@ -1,4 +1,4 @@
-# Hify 全栈一键起（本地 / 单机部署）
+# SayAgent 全栈一键起（本地 / 单机部署）
 # 依据：T4_部署Dockerfile与docker_compose与K8s清单.md、AGENTS.md §3.1 / §5.1 / §5.2 / §7.11 / §9
 #
 # 与根目录 docker-compose.yml 的关系：
