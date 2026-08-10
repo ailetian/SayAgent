@@ -1,1 +1,0 @@
-import{r as t}from"./request-s8QVRCqT.js";function s(){return t.get("/models")}function d(e){return t.post("/models",e)}function l(e,o){return t.put(`/models/${e}`,o)}function n(e){return t.delete(`/models/${e}`)}export{d as c,n as d,s as l,l as u};

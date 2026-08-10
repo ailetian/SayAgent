@@ -36,6 +36,8 @@ frontend/node_modules/
 frontend/dist/
 frontend/dist-*/
 frontend/.vite/
+# vite 构建/预览产物（形如 .bv<hash>/，含打包后的 js/css，纯构建产物）
+frontend/.bv*/
 frontend/*.log
 frontend/_dev_*.log
 frontend/_dev_*.out
