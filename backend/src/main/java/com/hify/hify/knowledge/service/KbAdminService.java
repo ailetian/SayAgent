@@ -20,6 +20,8 @@ import com.hify.hify.knowledge.web.KnowledgeBaseCreateRequest;
 import com.hify.hify.knowledge.web.KnowledgeBaseUpdateRequest;
 import com.hify.hify.knowledge.web.KnowledgeBaseVO;
 import com.hify.hify.knowledge.web.PageVO;
+import com.hify.hify.rbac.ResourceAccessService;
+import com.hify.hify.common.security.AuthContext;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,6 +59,8 @@ public class KbAdminService {
     private final AgentKbLinkRepository agentKbLinkRepository;
     /** 索引任务仓储（K6）：删除前把在途索引任务置 FAILED 用，同模块直接注入。 */
     private final IndexingJobRepository indexingJobRepository;
+    /** T5：资源授权服务（rbac），建库后给创建者本人写全权授权行（跨模块，接口级依赖 §3.2）。 */
+    private final ResourceAccessService resourceAccessService;
 
     public KbAdminService(KnowledgeBaseRepository knowledgeBaseRepository,
                           DocumentRepository documentRepository,
@@ -65,7 +69,8 @@ public class KbAdminService {
                           KbAccessGuard accessGuard,
                           AgentService agentService,
                           AgentKbLinkRepository agentKbLinkRepository,
-                          IndexingJobRepository indexingJobRepository) {
+                          IndexingJobRepository indexingJobRepository,
+                          ResourceAccessService resourceAccessService) {
         this.knowledgeBaseRepository = knowledgeBaseRepository;
         this.documentRepository = documentRepository;
         this.documentChunkRepository = documentChunkRepository;
@@ -74,6 +79,7 @@ public class KbAdminService {
         this.agentService = agentService;
         this.agentKbLinkRepository = agentKbLinkRepository;
         this.indexingJobRepository = indexingJobRepository;
+        this.resourceAccessService = resourceAccessService;
     }
 
     /**
@@ -103,32 +109,77 @@ public class KbAdminService {
         }
         kb.setCreatorId(accessGuard.currentUser());
         kb.setStatus(KnowledgeBase.Status.ACTIVE);
-        return toVO(knowledgeBaseRepository.save(kb));
+        KnowledgeBase saved = knowledgeBaseRepository.save(kb);
+        // T5：创建者自授权——给创建者本人写一行全权授权（保证自己能继续管理，§2.1 创建者权益）
+        resourceAccessService.grantCreator(ResourceAccessService.RESOURCE_KB, saved.getId(), saved.getCreatorId());
+        return toVO(saved);
     }
 
     /**
-     * 知识库列表（K8 keyset 游标分页 §6.4）：按 id 倒序，{@code id < lastId} 过滤。
+     * 知识库列表（K8 keyset 游标分页 §6.4 + T6 可见性过滤 §2.1）：按 id 倒序，{@code id < lastId} 过滤。
      *
      * <p>大白话：首页不传 lastId，取最新一批；后续把上一页末 id 当 lastId 翻下一页。
      * 永远不用 offset（深翻页越翻越慢），返回 nextCursor + hasMore 供前端续翻。
+     *
+     * <p><b>可见性过滤（T6，§2.1）</b>：ADMIN 看全部（含 RESTRICTED）；普通用户只看到
+     * {@code visibility='PUBLIC'} 或自己被显式授权的库（PUBLIC 并集由本方法合并，对应 T5 的范围切割）。
      */
     public PageVO<KnowledgeBaseVO> listBases(Long lastId, int limit) {
         int pageSize = limit <= 0 ? 20 : Math.min(limit, MAX_PAGE_SIZE);
+
+        // ADMIN：可见全部（含 RESTRICTED），不做授权过滤（§2.1 ADMIN 兜底）
+        if (AuthContext.isAdmin()) {
+            List<KnowledgeBase> list;
+            if (lastId == null) {
+                list = knowledgeBaseRepository
+                        .findAll(PageRequest.of(0, pageSize + 1, Sort.by(Sort.Direction.DESC, "id")))
+                        .getContent();
+            } else {
+                list = knowledgeBaseRepository.findByIdLessThanOrderByIdDesc(
+                        lastId, PageRequest.of(0, pageSize + 1));
+            }
+            return trimToPage(list, pageSize);
+        }
+
+        // 非 ADMIN：可见性过滤 = PUBLIC ∪ 显式授权（T5 visibleResourceIds）
+        Set<Long> visibleIds = computeVisibleKbIds();
+        if (visibleIds.isEmpty()) {
+            return new PageVO<>(List.of(), null, false);
+        }
         List<KnowledgeBase> list;
         if (lastId == null) {
-            list = knowledgeBaseRepository
-                    .findAll(PageRequest.of(0, pageSize + 1, Sort.by(Sort.Direction.DESC, "id")))
-                    .getContent();
+            list = knowledgeBaseRepository.findByIdInOrderByIdDesc(
+                    visibleIds, PageRequest.of(0, pageSize + 1));
         } else {
-            list = knowledgeBaseRepository.findByIdLessThanOrderByIdDesc(
-                    lastId, PageRequest.of(0, pageSize + 1));
+            list = knowledgeBaseRepository.findByIdInAndIdLessThanOrderByIdDesc(
+                    visibleIds, lastId, PageRequest.of(0, pageSize + 1));
         }
+        return trimToPage(list, pageSize);
+    }
+
+    /** 把查询出的库列表裁成 keyset 一页，计算 hasMore + nextCursor（§6.4）。 */
+    private PageVO<KnowledgeBaseVO> trimToPage(List<KnowledgeBase> list, int pageSize) {
         boolean hasMore = list.size() > pageSize;
         if (hasMore) {
             list = list.subList(0, pageSize);
         }
         String nextCursor = hasMore ? String.valueOf(list.get(list.size() - 1).getId()) : null;
         return new PageVO<>(list.stream().map(this::toVO).toList(), nextCursor, hasMore);
+    }
+
+    /**
+     * 计算当前用户可见的知识库 id 集合 = PUBLIC 库 id ∪ 显式授权 id（T5 visibleResourceIds）。
+     * ADMIN 不走此方法（直接看全部）。
+     */
+    private Set<Long> computeVisibleKbIds() {
+        Set<Long> ids = new LinkedHashSet<>(
+                knowledgeBaseRepository.findIdsByVisibility(KnowledgeBase.VISIBILITY_PUBLIC));
+        Set<Long> granted = resourceAccessService.visibleResourceIds(
+                AuthContext.currentUsername(), AuthContext.roleSet(), ResourceAccessService.RESOURCE_KB);
+        if (granted != null) {
+            ids.addAll(granted);
+        }
+        return ids;
     }
 
     /**

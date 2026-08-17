@@ -6,6 +6,7 @@ import com.hify.hify.agent.repository.AgentRepository;
 import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
 import com.hify.hify.modelprovider.service.ModelService;
+import com.hify.hify.rbac.ResourceAccessService;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,6 +47,9 @@ class AgentServiceAuthTest {
     @Mock
     private ModelService modelService; // 跨模块依赖：只认发布接口
 
+    @Mock
+    private ResourceAccessService resourceAccessService; // RAG 重构新增的依赖
+
     @InjectMocks
     private AgentService agentService;
 
@@ -69,12 +73,12 @@ class AgentServiceAuthTest {
         return new AgentCreateRequest("n", "d", "s", 1L, "m",
                 null, null, true, false, 0,
                 BigDecimal.valueOf(0.70), BigDecimal.valueOf(1.00), 2048, 8192,
-                null, null);
+                null, null, null);
     }
 
     private AgentUpdateRequest buildUpdate() {
         return new AgentUpdateRequest("n", null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     @Test

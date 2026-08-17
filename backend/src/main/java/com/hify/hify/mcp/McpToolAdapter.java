@@ -34,8 +34,10 @@ public class McpToolAdapter implements Tool {
 
     @Override
     public ToolDefinition getDefinition() {
-        // mcp.dto.ToolDefinition(name, description, inputSchema) 与 common.tool.ToolDefinition 同名同构，直接映射
-        return new ToolDefinition(mcpDef.name(), mcpDef.description(), mcpDef.inputSchema());
+        // mcp.dto.ToolDefinition(name, description, inputSchema, riskLevel, dataSensitivity) 与
+        // common.tool.ToolDefinition 同名同构，直接映射并携带 riskLevel + dataSensitivity
+        // （M10/T3+T4：canonical 的最终风险级别 / 数据敏感度赋值点）
+        return new ToolDefinition(mcpDef.name(), mcpDef.description(), mcpDef.inputSchema(), mcpDef.riskLevel(), mcpDef.dataSensitivity());
     }
 
     @Override

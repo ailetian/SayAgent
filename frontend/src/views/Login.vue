@@ -126,6 +126,8 @@ async function onSubmit() {
     const data = await apiLogin(form.username, form.password)
     // 成功：仅写入 token + 用户信息（绝不缓存/打印 password）
     auth.login(data.token, { username: data.username, role: data.role })
+    // 拉取身份快照（角色 + 可见菜单），驱动动态侧边栏（M9/T4）
+    await auth.fetchMe()
     // 仅允许同源内部路径，防止 open-redirect 跳转到外部/绝对地址
     const raw = typeof route.query.redirect === 'string' ? route.query.redirect : ''
     const redirect =

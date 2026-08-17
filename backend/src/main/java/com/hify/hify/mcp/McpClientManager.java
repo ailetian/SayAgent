@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
+import com.hify.hify.common.tool.DataSensitivity;
+import com.hify.hify.common.tool.RiskLevel;
 import com.hify.hify.mcp.dto.ToolDefinition;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -23,6 +25,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -55,7 +58,7 @@ public class McpClientManager {
     private static final String PROTOCOL_VERSION = "2024-11-05";
 
     /** 本客户端名字（initialize 的 clientInfo）。 */
-    private static final String CLIENT_NAME = "hify";
+    private static final String CLIENT_NAME = "sayagent";
 
     /** 本客户端版本。 */
     private static final String CLIENT_VERSION = "0.0.1";
@@ -205,12 +208,35 @@ public class McpClientManager {
      */
     private McpTransport createTransport(McpServer server) {
         String type = server.getType() == null ? "STDIO" : server.getType().toUpperCase();
+        // 凭据头在连接建立时解析一次（覆盖 initialize/tools/list/tools/call 全部请求，§7.3 规则14b）
+        Map<String, String> authHeaders = resolveAuthHeaders(server);
+        // M10/T4：本 Server 注册时标注的数据敏感度，作为它旗下所有工具的敏感度（MCP 协议无标准敏感度字段，靠管理员标注）
+        DataSensitivity ds = toDataSensitivity(server.getDataSensitivity());
         return switch (type) {
-            case "STDIO" -> new StdioTransport(server.getAddress());
+            case "STDIO" -> new StdioTransport(server.getAddress(), ds);
             case "HTTP", "SSE" -> new HttpTransport(okHttpClient, server.getAddress(),
-                    mcpConfig.getConnectTimeoutMs(), mcpConfig.getReadTimeoutMs());
+                    mcpConfig.getConnectTimeoutMs(), mcpConfig.getReadTimeoutMs(), authHeaders, ds);
             default -> throw new BizException(ErrorCode.MCP_CALL_FAILED, "不支持的 MCP 类型：" + type);
         };
+    }
+
+    /**
+     * 把 McpServer 存储的 dataSensitivity 字符串安全转成枚举（M10/T4）。
+     *
+     * <p>防御：null / 空 / 非法值一律兜底为 {@code INTERNAL}（默认分类），绝不抛异常（§7.3 规则10 不空吞但也不暴露）。
+     *
+     * @param s 存储字符串（如 "FINANCE_HR"）
+     * @return 枚举；非法时 INTERNAL
+     */
+    private static DataSensitivity toDataSensitivity(String s) {
+        if (s == null || s.isBlank()) {
+            return DataSensitivity.INTERNAL;
+        }
+        try {
+            return DataSensitivity.valueOf(s.trim());
+        } catch (IllegalArgumentException e) {
+            return DataSensitivity.INTERNAL;
+        }
     }
 
     /**
@@ -226,6 +252,72 @@ public class McpClientManager {
         clientInfo.put("name", CLIENT_NAME);
         clientInfo.put("version", CLIENT_VERSION);
         return params;
+    }
+
+    /**
+     * 把 {@link McpServer} 的鉴权配置解析成一组 HTTP 请求头（M10/T1，§7.11 敏感不落日志）。
+     *
+     * <p>大白话：管理员在 McpServer 上登记的「鉴权类型 + 凭据 JSON」，在这里翻译成具体的 HTTP 头，
+     * 由 {@link HttpTransport#rpc} / {@code sendNotification} 在 initialize / tools/list / tools/call 每
+     * 一次请求里带上，这样 ERP、飞书这类要登录的内部系统才连得上（免鉴权的 NONE 则不加任何头）。
+     *
+     * <p>凭据约定（authConfig JSON）：
+     * <ul>
+     *   <li>{@code BEARER} → {@code {"token":"..."}}  ⇒ {@code Authorization: Bearer <token>}</li>
+     *   <li>{@code APIKEY}  → {@code {"key":"..."}}    ⇒ {@code Authorization: ApiKey <key>}</li>
+     *   <li>{@code HEADER}  → {@code {"headers":{...}}} ⇒ 逐对注入自定义头</li>
+     * </ul>
+     *
+     * <p>健壮性：authType 为 null/NONE、或 authConfig 为空 / 解析失败时，<b>返回空集合</b>（不抛异常），
+     * 留待真实连接时由服务端 401 再统一转 {@code MCP_CALL_FAILED} 降级（§4.5）。整段逻辑绝不打印 token。
+     *
+     * @param server 已登记的服务端配置
+     * @return 需注入的请求头（有序 Map，可能为空）
+     */
+    private Map<String, String> resolveAuthHeaders(McpServer server) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        String authType = server.getAuthType();
+        if (authType == null || "NONE".equalsIgnoreCase(authType)) {
+            return headers;
+        }
+        String cfg = server.getAuthConfig();
+        if (cfg == null || cfg.isBlank()) {
+            log.debug("mcp auth_type={} 但 auth_config 为空，按无凭据连接 server={}", authType, server.getName());
+            return headers;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(cfg);
+            switch (authType.toUpperCase()) {
+                case "BEARER" -> {
+                    String token = node.path("token").asText(null);
+                    if (token != null && !token.isBlank()) {
+                        headers.put("Authorization", "Bearer " + token);
+                    }
+                }
+                case "APIKEY" -> {
+                    String key = node.path("key").asText(null);
+                    if (key != null && !key.isBlank()) {
+                        headers.put("Authorization", "ApiKey " + key);
+                    }
+                }
+                case "HEADER" -> {
+                    JsonNode hs = node.get("headers");
+                    if (hs != null && hs.isObject()) {
+                        hs.fields().forEachRemaining(e -> {
+                            String v = e.getValue().asText();
+                            if (!v.isBlank()) {
+                                headers.put(e.getKey(), v);
+                            }
+                        });
+                    }
+                }
+                default -> log.debug("mcp 未知 auth_type={} server={}", authType, server.getName());
+            }
+        } catch (IOException e) {
+            // 凭据 JSON 损坏：不抛（连接时多半 401），降级为无凭据，仅记 DEBUG（§7.3 规则10 不空吞但也不暴露 token）
+            log.debug("mcp auth_config 解析失败 server={}", server.getName(), e);
+        }
+        return headers;
     }
 
     /**
@@ -258,6 +350,29 @@ public class McpClientManager {
     }
 
     /**
+     * 从 MCP 工具定义解析风险级别（M10/T3，§3.2 统一工具契约）。
+     *
+     * <p>优先级：{@code destructiveHint=true} → L2（不可逆，最危险优先）；{@code readOnlyHint=true} → L0；
+     * 协议未声明任何 annotations → 默认 L1（宁严，§7.3 前置防御）。
+     *
+     * @param tool tools/list 返回的单个工具 JSON 节点
+     * @return 解析出的风险级别（默认 L1）
+     */
+    private static RiskLevel parseRiskLevel(JsonNode tool) {
+        JsonNode annotations = tool == null ? null : tool.get("annotations");
+        if (annotations != null && annotations.isObject()) {
+            // 破坏性优先于只读：两者同时声明时以更危险的 L2 为准（§7.3 宁严）
+            if (annotations.path("destructiveHint").asBoolean(false)) {
+                return RiskLevel.L2_IRREVERSIBLE;
+            }
+            if (annotations.path("readOnlyHint").asBoolean(false)) {
+                return RiskLevel.L0_READONLY_SAFE;
+            }
+        }
+        return RiskLevel.L1_WRITE_REVERSIBLE;
+    }
+
+    /**
      * MCP 传输层抽象（连接/发现/执行/关闭）。两个实现：HTTP（Streamable HTTP）与 STDIO（子进程）。
      */
     private interface McpTransport {
@@ -285,10 +400,17 @@ public class McpClientManager {
 
         private final String endpoint;
         private final OkHttpClient callClient;
+        /** 鉴权头集合（M10/T1）：来自 server 的 authType/authConfig，可能为空（NONE/免鉴权）。 */
+        private final Map<String, String> authHeaders;
+        /** 本 Server 的数据敏感度（M10/T4）：旗下所有工具统一标注，来自 server.getDataSensitivity()。 */
+        private final DataSensitivity serverDataSensitivity;
         private final java.util.concurrent.atomic.AtomicLong idSeq = new java.util.concurrent.atomic.AtomicLong(1);
 
-        HttpTransport(OkHttpClient baseClient, String endpoint, int connectTimeoutMs, int readTimeoutMs) {
+        HttpTransport(OkHttpClient baseClient, String endpoint, int connectTimeoutMs, int readTimeoutMs,
+                      Map<String, String> authHeaders, DataSensitivity serverDataSensitivity) {
             this.endpoint = endpoint;
+            this.authHeaders = authHeaders;
+            this.serverDataSensitivity = serverDataSensitivity;
             // 基于共享单例派生，仅覆盖超时；连接池被复用（§4.8 复用 + §4.3 两级超时）
             this.callClient = baseClient.newBuilder()
                     .connectTimeout(connectTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -312,7 +434,7 @@ public class McpClientManager {
                     String name = t.path("name").asText();
                     String description = t.path("description").asText();
                     JsonNode schema = t.get("inputSchema");
-                    list.add(new ToolDefinition(name, description, schema));
+                    list.add(new ToolDefinition(name, description, schema, parseRiskLevel(t), serverDataSensitivity));
                 }
             }
             return list;
@@ -366,11 +488,12 @@ public class McpClientManager {
             if (params != null) {
                 req.set("params", params);
             }
-            Request request = new Request.Builder()
+            Request.Builder builder = new Request.Builder()
                     .url(endpoint)
-                    .addHeader("Accept", "application/json, text/event-stream")
-                    .post(RequestBody.create(req.toString(), JSON))
-                    .build();
+                    .addHeader("Accept", "application/json, text/event-stream");
+            // 注入鉴权头（M10/T1）：Bearer/APIKey/自定义头，覆盖 initialize/list/call 全部请求
+            applyAuthHeaders(builder, authHeaders);
+            Request request = builder.post(RequestBody.create(req.toString(), JSON)).build();
             try (Response response = callClient.newCall(request).execute()) {
                 int code = response.code();
                 String body = response.body() != null ? response.body().string() : "";
@@ -398,16 +521,29 @@ public class McpClientManager {
             var req = objectMapper.createObjectNode();
             req.put("jsonrpc", JSONRPC);
             req.put("method", method);
-            Request request = new Request.Builder()
+            Request.Builder builder = new Request.Builder()
                     .url(endpoint)
-                    .addHeader("Accept", "application/json, text/event-stream")
-                    .post(RequestBody.create(req.toString(), JSON))
-                    .build();
+                    .addHeader("Accept", "application/json, text/event-stream");
+            // 通知同样携带鉴权头（避免 initialize 后首个通知被鉴权网关拦截）
+            applyAuthHeaders(builder, authHeaders);
+            Request request = builder.post(RequestBody.create(req.toString(), JSON)).build();
             try (Response response = callClient.newCall(request).execute()) {
                 // 通知无需解析响应体（§7.3 规则10：显式忽略而非吞异常）
                 response.body();
             } catch (IOException e) {
                 throw new BizException(ErrorCode.MCP_CALL_FAILED, "MCP 通知发送失败：" + e.getMessage());
+            }
+        }
+
+        /**
+         * 把鉴权头集合追加到请求构造器（M10/T1）。空集合直接跳过，不抛异常。
+         *
+         * @param builder 请求构造器
+         * @param headers 鉴权头（可能为空）
+         */
+        private static void applyAuthHeaders(Request.Builder builder, Map<String, String> headers) {
+            if (headers != null) {
+                headers.forEach(builder::addHeader);
             }
         }
 
@@ -450,13 +586,15 @@ public class McpClientManager {
      */
     private class StdioTransport implements McpTransport {
         private final String command;
+        private final DataSensitivity serverDataSensitivity;
         private Process process;
         private BufferedWriter stdin;
         private BufferedReader stdout;
         private final java.util.concurrent.atomic.AtomicLong idSeq = new java.util.concurrent.atomic.AtomicLong(1);
 
-        StdioTransport(String command) {
+        StdioTransport(String command, DataSensitivity serverDataSensitivity) {
             this.command = command;
+            this.serverDataSensitivity = serverDataSensitivity;
         }
 
         @Override
@@ -482,7 +620,7 @@ public class McpClientManager {
             List<ToolDefinition> list = new ArrayList<>();
             if (tools != null && tools.isArray()) {
                 for (JsonNode t : tools) {
-                    list.add(new ToolDefinition(t.path("name").asText(), t.path("description").asText(), t.get("inputSchema")));
+                    list.add(new ToolDefinition(t.path("name").asText(), t.path("description").asText(), t.get("inputSchema"), parseRiskLevel(t), serverDataSensitivity));
                 }
             }
             return list;

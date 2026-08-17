@@ -8,7 +8,7 @@
       <button class="btn-ghost" @click="back">返回列表</button>
     </div>
 
-    <el-tabs v-model="tab" class="kb-tabs">
+    <el-tabs v-model="tab" class="kb-tabs" @tab-change="onTab">
       <!-- 文档 -->
       <el-tab-pane label="文档" name="docs">
         <UploadPanel :kb-id="kbId" @uploaded="onUploaded" />
@@ -79,6 +79,39 @@
       <el-tab-pane label="试问台" name="probe">
         <ProbeConsole :kb-id="kbId" />
       </el-tab-pane>
+
+      <!-- 授权（M9/T7）：管理员 / 创建者可授权角色或具体用户，并查看 / 撤销 -->
+      <el-tab-pane label="授权" name="access">
+        <div v-if="!canManage" class="muted" style="padding:10px 2px">
+          仅管理员或知识库创建者可以管理授权。
+        </div>
+        <div v-else class="glass access">
+          <p v-if="grantError" class="error-text" style="margin-bottom:10px">{{ grantError }}</p>
+
+          <div class="form-label">当前授权</div>
+          <div v-if="grants.length === 0" class="muted">暂无授权，仅创建者本人可见。</div>
+          <div v-for="g in grants" :key="g.principalType + ':' + g.principalId" class="grant-row">
+            <span class="tag" :class="g.principalType === 'ROLE' ? 'tag-role' : 'tag-user'">{{ g.principalType }}</span>
+            <span class="grant-id">{{ g.principalId }}</span>
+            <span class="muted grant-perms">{{ permText(g) }}</span>
+            <button class="btn-ghost btn-sm" :disabled="busy" @click="revokeGrant(g)">撤销</button>
+          </div>
+
+          <div class="form-label" style="margin-top:18px">按角色批量授权（可读）</div>
+          <div class="muted" style="font-size:12px;margin:2px 0 8px">ADMIN 默认拥有全部权限，无需授权。</div>
+          <div class="role-row">
+            <label class="role-chk"><input type="checkbox" v-model="roleChecks.OPERATOR" /> OPERATOR</label>
+            <label class="role-chk"><input type="checkbox" v-model="roleChecks.USER" /> USER</label>
+            <button class="btn-grad btn-sm" :disabled="busy" @click="batchGrantRoles">授权选中角色</button>
+          </div>
+
+          <div class="form-label" style="margin-top:18px">添加个人（可读）</div>
+          <div class="person-row">
+            <input class="field" v-model="newUser" placeholder="输入用户名" @keyup.enter="addUser" />
+            <button class="btn-grad btn-sm" :disabled="busy || !newUser" @click="addUser">添加</button>
+          </div>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 删除确认弹窗：被 Agent 挂载时明确列出挂载方，不直接卸载 -->
@@ -90,7 +123,8 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
-import { askKb, listBases, updateBase } from '../api/knowledge'
+import { askKb, listBases, updateBase, listGrants, grantAccess, revokeAccess } from '../api/knowledge'
+import { useAuthStore } from '../stores/auth'
 import UploadPanel from '../components/UploadPanel.vue'
 import DocumentList from '../components/DocumentList.vue'
 import HealthBoard from '../components/HealthBoard.vue'
@@ -117,6 +151,91 @@ const settingsNote = ref('')
 const settingsError = ref('')
 const saving = ref(false)
 const delVisible = ref(false)
+
+// ===== M9/T7 授权 Tab 状态 =====
+const auth = useAuthStore()
+const grants = ref([])
+const grantError = ref('')
+const newUser = ref('')
+const roleChecks = reactive({ OPERATOR: false, USER: false })
+const busy = ref(false)
+
+// 管理者 = ADMIN 或本库创建者（与后端 requireManager 语义一致：非管理者调接口会被 403）
+const canManage = computed(() => {
+  const roles = auth.roles || []
+  if (roles.includes('ADMIN')) return true
+  if (kb.value && kb.value.creatorId && auth.user && auth.user.username) {
+    return kb.value.creatorId === auth.user.username
+  }
+  return false
+})
+
+function permText(g) {
+  const ps = []
+  if (g.canRead) ps.push('读')
+  if (g.canWrite) ps.push('写')
+  if (g.canUse) ps.push('用')
+  if (g.canEdit) ps.push('编')
+  return ps.length ? ps.join('/') : '无'
+}
+
+async function loadGrants() {
+  grantError.value = ''
+  try {
+    grants.value = (await listGrants('KB', kbId.value)) || []
+  } catch (e) {
+    grantError.value = e.message || '加载授权失败'
+  }
+}
+
+async function batchGrantRoles() {
+  const selected = Object.keys(roleChecks).filter((r) => roleChecks[r])
+  if (selected.length === 0) { grantError.value = '请先勾选至少一个角色'; return }
+  busy.value = true; grantError.value = ''
+  try {
+    for (const r of selected) {
+      await grantAccess({ principalType: 'ROLE', principalId: r, resourceType: 'KB', resourceId: kbId.value,
+        canRead: true, canWrite: false, canUse: true, canEdit: false })
+    }
+    await loadGrants()
+  } catch (e) {
+    grantError.value = e.message || '授权失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function addUser() {
+  if (!newUser.value) return
+  busy.value = true; grantError.value = ''
+  try {
+    await grantAccess({ principalType: 'USER', principalId: newUser.value.trim(), resourceType: 'KB', resourceId: kbId.value,
+      canRead: true, canWrite: false, canUse: true, canEdit: false })
+    newUser.value = ''
+    await loadGrants()
+  } catch (e) {
+    grantError.value = e.message || '添加失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function revokeGrant(g) {
+  busy.value = true; grantError.value = ''
+  try {
+    await revokeAccess({ principalType: g.principalType, principalId: g.principalId, resourceType: 'KB', resourceId: kbId.value })
+    await loadGrants()
+  } catch (e) {
+    grantError.value = e.message || '撤销失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+// 切到授权 Tab 时刷新列表（仅管理者）
+function onTab(name) {
+  if (name === 'access' && canManage.value) loadGrants()
+}
 
 const md = new MarkdownIt()
 
@@ -194,6 +313,7 @@ onMounted(async () => {
     edit.chunkStrategy = kb.value.chunkStrategy || 'AUTO'
     edit.language = kb.value.language || 'zh-CN'
     edit.isPublic = kb.value.isPublic !== false
+    if (canManage.value) loadGrants()
   }
 })
 </script>
@@ -216,4 +336,16 @@ onMounted(async () => {
   margin-top: 14px; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 10px;
   font-size: 12px; color: var(--muted); white-space: pre-wrap; word-break: break-all;
 }
+.access { padding: 18px 20px; max-width: 720px; }
+.grant-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line);
+}
+.grant-id { font-weight: 600; color: var(--accent-a); }
+.grant-perms { font-size: 12px; }
+.role-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.role-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+.person-row { display: flex; gap: 10px; max-width: 420px; }
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+.tag-role { background: rgba(124, 92, 255, 0.16); color: #9d86ff; border-color: rgba(124, 92, 255, 0.4); }
+.tag-user { background: rgba(45, 212, 191, 0.16); color: #2dd4bf; border-color: rgba(45, 212, 191, 0.4); }
 </style>

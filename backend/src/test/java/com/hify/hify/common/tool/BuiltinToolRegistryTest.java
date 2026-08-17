@@ -54,6 +54,8 @@ class BuiltinToolRegistryTest {
                 .collect(java.util.stream.Collectors.toSet());
         assertTrue(methods.contains("getDefinition"));
         assertTrue(methods.contains("execute"));
-        assertEquals(2, methods.size(), "Tool 接口应仅有两个方法");
+        // RAG 重构后 Tool 接口新增了 riskLevel()/dataSensitivity() 两个 default 方法
+        assertTrue(methods.contains("riskLevel"));
+        assertTrue(methods.contains("dataSensitivity"));
     }
 }

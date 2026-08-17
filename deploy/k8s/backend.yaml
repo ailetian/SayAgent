@@ -8,7 +8,7 @@ metadata:
   name: sayagent-backend
   labels:
     app: sayagent-backend
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   replicas: 2            # §5.2 高可用 + 滚动发布零中断（T5）
   selector:
@@ -31,31 +31,31 @@ spec:
           # 非敏感配置整体注入（键名即 Spring 环境变量名）
           envFrom:
             - configMapRef:
-                name: hify-config
+                name: sayagent-config
           # 敏感配置逐条从 Secret 取（§7.11）
           # 注：密码只用 MYSQL_PASSWORD / POSTGRES_PASSWORD 注入，由 application.yml 的
           #     ${MYSQL_PASSWORD} / ${POSTGRES_PASSWORD} 占位符消费（避免与 SPRING_DATASOURCE_PASSWORD
           #     重复绑定同一属性 spring.datasource.password）。
           env:
-            - name: HIFY_JWT_SECRET
+            - name: SAYAGENT_JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: hify-secrets
-                  key: hify-jwt-secret
-            - name: HIFY_ADMIN_PASSWORD
+                  name: sayagent-secrets
+                  key: sayagent-jwt-secret
+            - name: SAYAGENT_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: hify-secrets
-                  key: hify-admin-password
+                  name: sayagent-secrets
+                  key: sayagent-admin-password
             - name: MYSQL_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: hify-secrets
+                  name: sayagent-secrets
                   key: mysql-password
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: hify-secrets
+                  name: sayagent-secrets
                   key: postgres-password
           # §5.2 探针必须区分：就绪(依赖就绪才接流量) / 存活(进程存活即重启)
           readinessProbe:
@@ -92,7 +92,7 @@ metadata:
   name: sayagent-backend
   labels:
     app: sayagent-backend
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   type: ClusterIP
   selector:

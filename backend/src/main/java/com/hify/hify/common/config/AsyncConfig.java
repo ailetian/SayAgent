@@ -26,7 +26,7 @@ public class AsyncConfig {
     /** LLM 生成：主对话链路，并发最高，队列给 200（§4.2 模板）。 */
     @Bean("llmExecutor")
     public Executor llmExecutor() {
-        ThreadFactory factory = new CustomizableThreadFactory("hify-llm-");
+        ThreadFactory factory = new CustomizableThreadFactory("sayagent-llm-");
         return new ThreadPoolExecutor(
                 8, 16, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(200),
@@ -37,7 +37,7 @@ public class AsyncConfig {
     /** Embedding 向量化：文档入库用，IO 密集，队列给 100。 */
     @Bean("embeddingExecutor")
     public Executor embeddingExecutor() {
-        ThreadFactory factory = new CustomizableThreadFactory("hify-embed-");
+        ThreadFactory factory = new CustomizableThreadFactory("sayagent-embed-");
         return new ThreadPoolExecutor(
                 4, 8, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(100),
@@ -48,7 +48,7 @@ public class AsyncConfig {
     /** RAG 检索：查向量库，偏 CPU/网络，队列给 100。 */
     @Bean("retrievalExecutor")
     public Executor retrievalExecutor() {
-        ThreadFactory factory = new CustomizableThreadFactory("hify-retrieval-");
+        ThreadFactory factory = new CustomizableThreadFactory("sayagent-retrieval-");
         return new ThreadPoolExecutor(
                 4, 8, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(100),

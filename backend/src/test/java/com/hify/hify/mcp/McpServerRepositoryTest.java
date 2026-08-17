@@ -72,6 +72,10 @@ class McpServerRepositoryTest {
         s.setAddress(address);
         s.setType(type);
         s.setStatus(status);
+        // V32(M10/T1,T4) 给 mcp_server 追加了 NOT NULL 的 auth_type / data_sensitivity，
+        // 实体层必须显式赋值，否则 Hibernate 把 null 写进 INSERT 会被 MySQL 拒（column cannot be null）。
+        s.setAuthType("NONE");
+        s.setDataSensitivity("INTERNAL");
         return s;
     }
 }

@@ -64,8 +64,8 @@ public class KnowledgeService {
     /** 列表分页硬上限（§6.4 keyset 游标；防一次拉全表）。 */
     private static final int MAX_PAGE_SIZE = 100;
 
-    /** 源文档落盘目录（网站下的目录，部署时通过 hify.sources-dir 配置；默认相对工作目录的 data/sources）。 */
-    @Value("${hify.sources-dir:data/sources}")
+    /** 源文档落盘目录（网站下的目录，部署时通过 sayagent.sources-dir 配置；默认相对工作目录的 data/sources）。 */
+    @Value("${sayagent.sources-dir:data/sources}")
     private String sourcesDir;
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
@@ -176,7 +176,7 @@ public class KnowledgeService {
     /**
      * 落盘源文档原始字节，供「查看源文档」回看；并回填 source_ref / mime_type / size_bytes。
      *
-     * <p>大白话：解析在主流程已同步完成，这里仅做文件持久化（写入 hify.sources-dir 目录，文件名用业务
+     * <p>大白话：解析在主流程已同步完成，这里仅做文件持久化（写入 sayagent.sources-dir 目录，文件名用业务
      * documentId，天然去重且和切片表 document_id 同口径）。落盘失败只影响「源文档预览」这一项，
      * 不影响索引流水线（检索照常工作），故仅记日志不抛异常。
      */

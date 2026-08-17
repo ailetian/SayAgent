@@ -13,7 +13,7 @@ import java.util.Date;
 
 /**
  * 门禁卡机：登录成功发 token（含 username + role，2h 有效）；闸机拿 token 验真伪与过期。
- * 密钥走配置 ${hify.jwt.secret}（§9 不硬编码，生产用环境变量注入，至少 256bit）。
+ * 密钥走配置 ${sayagent.jwt.secret}（§9 不硬编码，生产用环境变量注入，至少 256bit）。
  */
 @Component
 public class JwtUtil {
@@ -23,8 +23,8 @@ public class JwtUtil {
     private final SecretKey key;
     private final long expirationMs;
 
-    public JwtUtil(@Value("${hify.jwt.secret}") String secret,
-                   @Value("${hify.jwt.expiration-ms:" + DEFAULT_EXPIRATION_MS + "}") long expirationMs) {
+    public JwtUtil(@Value("${sayagent.jwt.secret}") String secret,
+                   @Value("${sayagent.jwt.expiration-ms:" + DEFAULT_EXPIRATION_MS + "}") long expirationMs) {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationMs = expirationMs;
     }

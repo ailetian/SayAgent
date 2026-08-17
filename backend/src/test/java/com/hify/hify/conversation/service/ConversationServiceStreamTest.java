@@ -9,8 +9,9 @@ import com.hify.hify.conversation.entity.Conversation;
 import com.hify.hify.conversation.entity.Message;
 import com.hify.hify.conversation.repository.ConversationRepository;
 import com.hify.hify.conversation.repository.MessageRepository;
-import com.hify.hify.knowledge.repository.DocumentRepository;
-import com.hify.hify.knowledge.retriever.RetrievalPort;
+import com.hify.hify.knowledge.service.KbRetrievalService;
+import com.hify.hify.knowledge.service.QueryIntentClassifier;
+import com.hify.hify.skill.service.SkillService;
 import com.hify.hify.conversation.tool.ToolLoopRunner;
 import com.hify.hify.conversation.tool.ToolRegistry;
 import com.hify.hify.modelprovider.domain.enums.ProviderType;
@@ -78,9 +79,11 @@ class ConversationServiceStreamTest {
     @Mock
     private LlmStreamService llmStreamService;
     @Mock
-    private RetrievalPort retrievalPort;
+    private KbRetrievalService kbRetrievalService;
     @Mock
-    private DocumentRepository documentRepository;
+    private QueryIntentClassifier intentClassifier;
+    @Mock
+    private SkillService skillService;
     @Mock
     private ConversationLogAsyncWriter conversationLogAsyncWriter;
     @Mock
@@ -104,8 +107,8 @@ class ConversationServiceStreamTest {
         });
 
         svc = new ConversationService(conversationRepository, messageRepository, userService,
-                sseExecutor, agentService, modelService, llmStreamService, retrievalPort,
-                documentRepository, conversationLogAsyncWriter, toolRegistry, toolLoopRunner);
+                sseExecutor, agentService, modelService, llmStreamService, conversationLogAsyncWriter,
+                toolRegistry, toolLoopRunner, skillService, kbRetrievalService, intentClassifier);
         spySvc = spy(svc);
         // M8/T3：工具循环默认无工具、回显 seedMessages，保持既有流式完整性断言不受函数调用改造影响
         lenient().when(toolRegistry.resolve(any())).thenReturn(List.of());
@@ -133,7 +136,7 @@ class ConversationServiceStreamTest {
         when(messageRepository.findByConversationIdOrderBySeqAsc(anyString())).thenReturn(List.of());
         // K11：retrieveKnowledge 先取本库未软删文档 id 下推 PG；本测 Agent 无 knowledgeRefs 会提前 return，
         // findByKbId 未必被调用，标记为 lenient 避免严格桩误报
-        lenient().when(documentRepository.findByKbId(anyLong())).thenReturn(List.of());
+        lenient().when(intentClassifier.classify(anyString())).thenReturn(QueryIntentClassifier.Intent.QUESTION);
         when(messageRepository.countByConversationId(anyString())).thenReturn(0L);
         when(messageRepository.save(any(Message.class))).thenAnswer(inv -> {
             Message m = inv.getArgument(0);

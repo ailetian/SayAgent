@@ -24,7 +24,7 @@
         <tbody>
           <tr v-for="a in agents" :key="a.id">
             <td class="muted">{{ a.id }}</td>
-            <td><div style="font-weight:600">{{ a.name }}</div><div class="muted" style="font-size:12px">ref 知识 {{ (a.knowledgeRefs||[]).length }} · 工具 {{ (a.toolRefs||[]).length }} · 技能 {{ (a.skillRefs||[]).length }}</div></td>
+            <td><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">{{ a.name }}</span><AgentSensitivityBadge :max-data-sensitivity="a.maxDataSensitivity" :max-risk-level="a.maxRiskLevel" :finance-hr-tool-count="a.financeHrToolCount" :confidential-tool-count="a.confidentialToolCount" /></div><div class="muted" style="font-size:12px">ref 知识 {{ (a.knowledgeRefs||[]).length }} · 工具 {{ (a.toolRefs||[]).length }} · 技能 {{ (a.skillRefs||[]).length }}</div></td>
             <td><span class="tag tag-a">{{ modelLabel(a.modelProviderId) }}</span></td>
             <td>
               <span class="tag" :class="a.enabled ? 'tag-a' : 'tag-danger'">{{ a.enabled ? '启用' : '停用' }}</span>
@@ -34,6 +34,7 @@
             <td>
               <div class="row-actions">
                 <button class="link-a" @click="openEdit(a)">编辑</button>
+                <button v-if="canManageAgent" class="link-a" @click="openAccess(a)">授权</button>
                 <button class="link-danger" @click="remove(a)">删除</button>
               </div>
             </td>
@@ -120,17 +121,24 @@
         <button class="btn-grad" :disabled="saving" @click="save">保存</button>
       </template>
     </el-dialog>
+
+    <!-- M10/T6 Agent 授权管理：独立对话框组件（风险预览 + 强制确认 + 审计），
+         仅 ADMIN 可管理；普通 Agent 授权无弹窗、高危 Agent 授权弹强制确认。 -->
+    <AgentAuthorizeDialog v-model="accessVisible" :agent="accessTarget" @changed="load" />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listAgents, createAgent, updateAgent, deleteAgent } from '../api/agent'
 import { listModels } from '../api/model'
 import { listMcpServers } from '../api/mcp'
 import { listBases } from '../api/knowledge'
 import { listSkills } from '../api/skill'
+import { useAuthStore } from '../stores/auth'
+import AgentAuthorizeDialog from './AgentAuthorizeDialog.vue'
+import AgentSensitivityBadge from '../components/AgentSensitivityBadge.vue'
 
 const agents = ref([])
 const models = ref([])
@@ -140,6 +148,17 @@ const skills = ref([])
 const dialog = ref(false)
 const editing = ref(null)
 const saving = ref(false)
+
+// ===== M10/T6 Agent 授权管理：抽出独立对话框组件（风险预览 + 强制确认 + 审计）=====
+// 授权逻辑（含高危强制确认、后端审计）全部在 AgentAuthorizeDialog.vue 内，本页仅负责打开。
+const auth = useAuthStore()
+const canManageAgent = computed(() => (auth.roles || []).includes('ADMIN'))
+const accessVisible = ref(false)
+const accessTarget = ref(null)
+function openAccess(a) {
+  accessTarget.value = a
+  accessVisible.value = true
+}
 
 const empty = () => ({
   name: '', description: '', modelProviderId: null, model: '', systemPrompt: '',
@@ -155,15 +174,24 @@ function modelLabel(id) {
   return `${m.providerType} · ${m.model || '?'} (#${m.id})`
 }
 
+// 列表页只加载「列表必需」数据：agents + models（表格里的模型标签要靠 models 渲染）。
+// 不再在 onMounted 一次性并行拉 MCP/KB/技能——MCP 列表是 ADMIN 专属接口，
+// 非 ADMIN 一调就 403，原 Promise.all 会让整个 load() reject，导致列表也加载不出来。
 async function load() {
-  const [a, m, ms, kb, sk] = await Promise.all([
-    listAgents(), listModels(), listMcpServers(), listBases(), listSkills()
-  ])
+  const [a, m] = await Promise.all([listAgents(), listModels()])
   agents.value = a
   models.value = m
-  mcpServers.value = ms
-  knowledgeBases.value = (kb && kb.items) || []
-  skills.value = sk || []
+}
+
+// 新增/编辑弹窗才需要的辅助数据：MCP Server / 知识库 / 技能。
+// 各自独立 try/catch 容错：某一类接口（如非 ADMIN 拉 MCP 列表）失败不影响其余下拉框与弹窗本身。
+async function loadAux() {
+  try { mcpServers.value = await listMcpServers() } catch (e) { mcpServers.value = [] }
+  try {
+    const kb = await listBases()
+    knowledgeBases.value = (kb && kb.items) || []
+  } catch (e) { knowledgeBases.value = [] }
+  try { skills.value = await listSkills() } catch (e) { skills.value = [] }
 }
 
 function toForm(a) {
@@ -180,6 +208,7 @@ function openCreate() {
   editing.value = null
   form.value = empty()
   dialog.value = true
+  loadAux()
 }
 
 function onProviderChange(id) {
@@ -191,6 +220,7 @@ function openEdit(a) {
   editing.value = a.id
   form.value = toForm(a)
   dialog.value = true
+  loadAux()
 }
 
 async function save() {
@@ -225,5 +255,24 @@ async function remove(a) {
   } catch (e) { /* 拦截器提示 */ }
 }
 
-onMounted(load)
+onMounted(async () => {
+  // 确保身份快照（roles）已加载，否则 ADMIN 判定会漏判（Agents 页本身不带角色守卫）
+  if (!auth.roles || auth.roles.length === 0) {
+    await auth.fetchMe()
+  }
+  await load()
+})
+
 </script>
+
+<style scoped>
+.grant-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.grant-id { font-weight: 600; color: var(--accent-a); }
+.grant-perms { font-size: 12px; }
+.role-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.role-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+.person-row { display: flex; gap: 10px; max-width: 420px; }
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+.tag-role { background: rgba(124, 92, 255, 0.16); color: #9d86ff; border-color: rgba(124, 92, 255, 0.4); }
+.tag-user { background: rgba(45, 212, 191, 0.16); color: #2dd4bf; border-color: rgba(45, 212, 191, 0.4); }
+</style>

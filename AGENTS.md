@@ -30,7 +30,7 @@
 
 | 序号 | 模块 | 说明 |
 |---|---|---|
-| 1 | 基础登录 + 轻量权限 | 登录 + 管理员/用户两种角色（Spring Security + JWT） |
+| 1 | 基础登录 + 轻量权限 + 用户管理 | 登录 + JWT；角色升级为 ADMIN/OPERATOR/USER 三档（见 §2.1）；新增后台建用户（选角色）、角色驱动菜单、KB/Agent 按角色+个人混合授权（详见 §2.1 与 `plans/10_M9_用户管理与角色权限.md`） |
 | 2 | 模型管理（简化） | 管理员在后台**手动添加**模型：填名称、API 地址、秘钥、类型（OpenAI/Claude/Gemini/Ollama），可配 1–3 个，存 MySQL 全公司共用 |
 | 3 | Agent 配置（简化） | 表单式：人设提示词 + 选模型 + 挂知识/工具（不做拖拽画布） |
 | 4 | 知识库 + RAG | 文档上传、向量化、检索问答（上传→切分→embedding→pgvector→检索） |
@@ -42,6 +42,41 @@
 **砍掉 6 项（首版不做）**：可视化 Workflow 画布、插件市场、嵌入发布/公开分享、高级 LLMOps 看板、多租户/计费、知识管道评测台。
 
 **关键简化约定**：Orchestration 用表单/配置页，不做画布；模型管理用配置页，不做供应商市场；MCP 轻量化（配置地址→自动发现工具），不做完整插件市场；**工作流（简版）仅支持 YAML/JSON 配置式顺序定义，禁止引入任何前端拖拽编排库**。
+
+### 2.1 角色与权限模型（深化 M2 / 新模块 M9）
+
+> 解决"按角色显示菜单 + 按角色/个人控制可用知识库与 Agent"。本段为权限规则唯一事实源；详细计划与任务拆分见 `plans/10_M9_用户管理与角色权限.md`。
+
+**1. 角色集（固定三档，不自由建角色）**
+- `ADMIN` 平台管理员：模型/MCP/用户/系统配置全权。
+- `OPERATOR` 知识运营：可建/管知识库与 Agent，但看不到模型/MCP/用户等平台级配置。
+- `USER` 普通成员：仅对话、使用被授权资源，不能自建 KB/Agent。
+- 枚举落在现有 `UserRole`（由 `ADMIN/USER` 扩展为 `ADMIN/OPERATOR/USER`）。
+
+**2. 两条正交权限轴（都由角色统一驱动）**
+- **功能菜单轴**：`menu_item`(菜单定义) + `role_menu(role_code, menu_code)` → 侧边栏动态渲染；前端登录后拉 `GET /api/me`，路由加 `meta.roles` 守卫。
+- **数据资源轴**：KB/Agent 的 `visibility` + 统一 `resource_access` 表做角色/个人混合授权。
+
+**3. 资源授权模型（混合：角色基线 + 个人覆盖）**
+- 统一表 `resource_access(principal_type ENUM('ROLE','USER'), principal_id, resource_type ENUM('KB','AGENT'), resource_id, can_read/can_write/can_use/can_edit)`；新增资源类型（MCP/Workflow）不另建表。
+- **默认可见性 = RESTRICTED**（secure by default）：新建 KB/Agent 默认仅授权可见；`PUBLIC` 保留为可选值，但不再默认。
+- 新建资源的**创建者自动获得**该资源 `resource_access`（principal_type='USER', 本人, 全权），保证自己能继续管理。
+- **判定逻辑**：资源对当前用户可见/可用 ⟺ `visibility='PUBLIC'` **或** 存在匹配当前用户(其角色集 / 本人)的 `resource_access` 记录；都不成立则默认不可见。
+- `ADMIN` 对所有 KB / Agent **隐式拥有读+写+用+管全权**（平台管理员兜底，不受 RESTRICTED 限制，**无需也不允许**建 `resource_access` 行）；授权操作（T7）**禁止以 ADMIN 角色为授权主体**——前端授权 Tab 角色下拉不含 ADMIN，后端 `ResourceAccessService.grant/revoke` 遇 `principalType=ROLE & principalId=ADMIN` 直接拒绝（`PARAM_INVALID`）。
+
+**4. 用户管理（MVP 范围：建 + 列）**
+- `POST /api/users`：`{username, password, role, displayName?, email?}`；`role` 取 `UserRole` 枚举，不传默认 `USER`；`username` 唯一校验；密码走 `PasswordEncoderConfig`(BCrypt) 编码。
+- `GET /api/users`：返回 `List<UserVO>`（密码已 `@JsonIgnore` 屏蔽）。
+- 管理员守卫：service 层手写 `requireAdmin()`，非 ADMIN 抛 `BizException(FORBIDDEN)`（与 AgentService/ModelService 一致，不另起鉴权机制）。
+- MVP 先做建+列；改角色/禁用/删号/改密后续补。
+
+**5. 菜单与路由**
+- 菜单定义用种子数据初始化（**不做**"菜单管理后台界面"）。
+- 前端「用户管理」页经 `role_menu` 映射仅对 ADMIN 显示，成为菜单轴第一个真实落地。
+
+**6. 与现有代码衔接**
+- `listBases`/`listAgents` 后端**必须加 visibility + resource_access 过滤**（堵"列表返回全部"已知缺口）。
+- 写操作继续用 service 层 `requireAdmin()`/`isAdmin()` 兜底（@PreAuthorize 实际未生效，靠手写）。
 
 ---
 

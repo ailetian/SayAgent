@@ -50,27 +50,47 @@ SayAgent 是一个**单租户、自托管**的轻量 AI 平台，定位与 Dify 
 
 ## 本地跑通
 
-### 前置要求
+> **给大多数用户（只想尽快跑起来）**：直接用 Docker 一键起，本机**只需装 Docker**，无需 JDK / Maven / Node。
+> 克隆后执行 `./start.sh`（macOS / Linux / Git Bash）或 `start.bat`（Windows）即可，详情见 **[QUICKSTART.md](QUICKSTART.md)**。
+
+### 方式一：Docker 一键起（推荐，零本地工具链）
+
+```bash
+git clone <你的仓库地址> sayagent && cd sayagent
+./start.sh          # Windows: start.bat
+# 自动生成 deploy/.env → 容器内构建 backend/frontend 镜像 → 起全栈 → 轮询健康检查
+```
+
+- 访问前端：**http://localhost:8080**
+- 接口文档：**http://localhost:9095/swagger-ui.html**
+- 默认管理员：`admin` / `admin123`（见 `deploy/.env`）
+- 停止：`./stop.sh`（Windows: `stop.bat`）
+- 首次构建会拉取 maven / node 基础镜像并下载依赖，需 3~8 分钟，属正常。
+
+### 方式二：本机开发运行（需完整工具链）
+
+#### 前置要求
 
 - **JDK 21**
 - **Maven 3.8+**
-- **Docker + Docker Compose**（起 MySQL / Redis / pgvector 三个中间件）
+- **Node 20+** 与 npm
+- **Docker + Docker Compose**（仅用于起 MySQL / Redis / pgvector 三个中间件）
 
-### 第 1 步：起中间件
+#### 第 1 步：起中间件
 
 ```powershell
 docker compose up -d
 docker compose ps   # 三容器均 healthy 即过关
 ```
 
-### 第 2 步：启动后端
+#### 第 2 步：启动后端
 
-> Windows 中文工程路径注意：`mvn spring-boot:run` 在含中文路径下会 fork 子 JVM 并以 GBK 解码 `-cp` 导致 `ClassNotFoundException`；**推荐用 `java -jar` 启动**（fat jar 内部 classpath 无中文路径）。详见 `rule/坑位库.md` 的 K1。
+> Windows 中文工程路径注意：`mvn` 在含中文路径下会 fork 子 JVM 并以 GBK 解码 `-cp` 导致 `ClassNotFoundException`；**建议把仓库放到纯英文路径，或改用方式一（Docker 构建在 Linux 容器内，无此问题）**。
 
 ```powershell
 cd backend
 mvn -DskipTests package
-java -Dfile.encoding=UTF-8 -jar target\hify-backend-0.0.1-SNAPSHOT.jar
+java -Dfile.encoding=UTF-8 -jar target\sayagent-backend-0.0.1-SNAPSHOT.jar
 ```
 
 看到 `Started SayAgentApplication` 即启动成功。健康检查：
@@ -80,6 +100,15 @@ curl http://localhost:9095/actuator/health
 ```
 
 接口文档：<http://localhost:9095/swagger-ui.html>
+
+#### 第 3 步：启动前端（另开终端）
+
+```powershell
+cd frontend
+npm install
+npm run dev          # 开发服务器 http://localhost:6177（已配 /api 反代到 9095）
+# 或构建静态产物：npm run build → 用静态服务器托管 frontend/dist
+```
 
 ## 安全说明（重要）
 
@@ -91,8 +120,8 @@ curl http://localhost:9095/actuator/health
 **任何对外部署务必用环境变量覆盖**，切勿使用默认值：
 
 ```powershell
-$env:HIFY_ADMIN_PASSWORD="你的强口令"
-$env:HIFY_JWT_SECRET="至少32字节的随机密钥"
+$env:SAYAGENT_ADMIN_PASSWORD="你的强口令"
+$env:SAYAGENT_JWT_SECRET="至少32字节的随机密钥"
 ```
 
 ## 目录结构
@@ -103,8 +132,14 @@ hify/
 ├── frontend/         # Vue 3 前端（Vite）
 ├── deploy/           # 部署相关（initdb / K8s 清单）
 ├── doc/              # 对外设计文档（需求 / 选型 / 部署 / 架构 / 数据库规范）
-├── docker-compose.yml# 本地起 mysql/redis/pgvector
+├── docker-compose.yml# 本地起 mysql/redis/pgvector（开发联调用）
+├── deploy/           # 部署相关（Dockerfile / 全栈 docker-compose / initdb / nginx / K8s）
+├── frontend/
+│   └── Dockerfile    # 前端多阶段构建（node 构建 → nginx 托管）
 ├── rule/             # 开发坑位库（踩坑与解法）
+├── start.sh / start.bat  # 一键启动（自动 .env + 构建 + 健康检查）
+├── stop.sh / stop.bat    # 一键停止
+├── QUICKSTART.md     # 快速开始（两种运行方式 + 排错）
 ├── AGENTS.md         # 项目规则唯一入口（编码/数据库/LLM/部署规范）
 └── README.md
 ```

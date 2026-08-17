@@ -227,8 +227,17 @@ public class ConversationService {
 
         // §4.6 SSE 取消：断连时既中断编排线程，也直接取消 LLM token 流订阅，避免白烧 token
         AtomicReference<Disposable> disposableRef = new AtomicReference<>();
-        Future<?> future = sseExecutor.submit(
-                () -> orchestrate(emitter, req, userId, conv, convId, assistantMsgId, disposableRef));
+        // 对话编排跑在虚拟线程（sseExecutor）上；SecurityContext 默认 ThreadLocal 不跨线程传播，
+        // 必须显式把主请求线程已校验好的身份带进虚拟线程，否则后续 assertAccessible 等鉴权会误判未认证。
+        org.springframework.security.core.context.SecurityContext secCtx = SecurityContextHolder.getContext();
+        Future<?> future = sseExecutor.submit(() -> {
+            SecurityContextHolder.setContext(secCtx);
+            try {
+                orchestrate(emitter, req, userId, conv, convId, assistantMsgId, disposableRef);
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        });
         emitter.onTimeout(() -> {
             log.warn("chat stream timeout convId={}", conversationId);
             cancelStream(future, disposableRef);

@@ -11,9 +11,10 @@ import com.hify.hify.conversation.entity.Conversation;
 import com.hify.hify.conversation.entity.Message;
 import com.hify.hify.conversation.repository.ConversationRepository;
 import com.hify.hify.conversation.repository.MessageRepository;
-import com.hify.hify.knowledge.entity.Document;
-import com.hify.hify.knowledge.repository.DocumentRepository;
-import com.hify.hify.knowledge.retriever.RetrievalPort;
+import com.hify.hify.knowledge.retriever.RetrievalResult;
+import com.hify.hify.knowledge.service.KbRetrievalService;
+import com.hify.hify.knowledge.service.QueryIntentClassifier;
+import com.hify.hify.skill.service.SkillService;
 import com.hify.hify.conversation.tool.ToolLoopRunner;
 import com.hify.hify.conversation.tool.ToolRegistry;
 import com.hify.hify.modelprovider.client.ChatMessage;
@@ -56,6 +57,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -83,9 +85,11 @@ class ConversationServiceTest {
     @Mock
     private LlmStreamService llmStreamService;
     @Mock
-    private RetrievalPort retrievalPort;
+    private KbRetrievalService kbRetrievalService;
     @Mock
-    private DocumentRepository documentRepository;
+    private QueryIntentClassifier intentClassifier;
+    @Mock
+    private SkillService skillService;
     @Mock
     private ConversationLogAsyncWriter conversationLogAsyncWriter;
     @Mock
@@ -95,6 +99,7 @@ class ConversationServiceTest {
 
     private ConversationService svc;
     private ConversationService spySvc;
+    private AgentVO agent;
 
     private final List<ConversationService.ChatEvent> events = new ArrayList<>();
 
@@ -107,8 +112,8 @@ class ConversationServiceTest {
         });
 
         svc = new ConversationService(conversationRepository, messageRepository, userService,
-                sseExecutor, agentService, modelService, llmStreamService, retrievalPort,
-                documentRepository, conversationLogAsyncWriter, toolRegistry, toolLoopRunner);
+                sseExecutor, agentService, modelService, llmStreamService, conversationLogAsyncWriter,
+                toolRegistry, toolLoopRunner, skillService, kbRetrievalService, intentClassifier);
         spySvc = spy(svc);
         // M8/T3：工具循环默认无工具、直接回显 seedMessages（把编排循环与知识/流式断言解耦，
         // 让既有 SSE/知识注入用例不受函数调用改造影响）
@@ -122,7 +127,7 @@ class ConversationServiceTest {
         }).when(spySvc).send(any(SseEmitter.class), any(ConversationService.ChatEvent.class));
 
         // 公共 Mock：Agent / 厂商 / 召回 / 历史
-        AgentVO agent = mock(AgentVO.class);
+        agent = mock(AgentVO.class);
         when(agent.modelProviderId()).thenReturn(10L);
         when(agent.knowledgeRefs()).thenReturn(List.of(100L));
         when(agent.systemPrompt()).thenReturn("你是助手");
@@ -137,10 +142,8 @@ class ConversationServiceTest {
         when(messageRepository.findByConversationIdOrderBySeqAsc(anyString())).thenReturn(List.of());
         // countByConversationId 仅 stream/终态统计路径用到，orchestrate 直测不调，标记 lenient
         lenient().when(messageRepository.countByConversationId(anyString())).thenReturn(2L);
-        // K11：retrieveKnowledge 先取本库未软删文档 id 下推 PG；默认返回一篇保证 retrieve 真被调用
-        Document kbDoc = new Document();
-        kbDoc.setDocumentId("doc-x");
-        when(documentRepository.findByKbId(anyLong())).thenReturn(List.of(kbDoc));
+        // 意图网关：非 QUESTION 跳过知识库检索；本测试 Agent 配了知识库，置 QUESTION 走检索分支
+        when(intentClassifier.classify(anyString())).thenReturn(QueryIntentClassifier.Intent.QUESTION);
         when(messageRepository.save(any(Message.class))).thenAnswer(inv -> {
             Message m = inv.getArgument(0);
             if (m.getId() == null) {
@@ -178,8 +181,8 @@ class ConversationServiceTest {
 
     @Test
     void testOrchestrate_normalFlow_emitsMetaTokenDoneAndPersistsAssistantAndLog() {
-        when(retrievalPort.retrieve(anyString(), anyList(), anyInt(), anyDouble()))
-                .thenReturn(List.of(new RetrievalPort.RetrievedChunk("doc-x", 1, "知识内容A", 0.9)));
+        when(kbRetrievalService.retrieve(anyLong(), anyString()))
+                .thenReturn(List.of(new RetrievalResult("doc-x", 1, "知识内容A", 0.9, 1, RetrievalResult.RetrievalSource.SEMANTIC, 0.9)));
         when(llmStreamService.stream(any(), anyLong(), any()))
                 .thenReturn(reactor.core.publisher.Flux.just("Hello", " world"));
         when(messageRepository.findById(99L)).thenReturn(Optional.of(assistantPending(99L, "conv-1")));
@@ -224,15 +227,10 @@ class ConversationServiceTest {
     }
 
     @Test
-    void testOrchestrate_knowledgeRetrieveFails_streamsWithoutContext() {
-        // 召回炸了：应 fallback（空知识），但不阻断 LLM 流式
-        when(retrievalPort.retrieve(anyString(), anyList(), anyInt(), anyDouble()))
+    void testOrchestrate_knowledgeRetrieveFails_returnsNoHitReplyWithoutCallingLlm() {
+        // 配了 KB 但召回失败（异常）→ 按新设计短路返回固定话术，不再调用 LLM/工具循环编造
+        when(kbRetrievalService.retrieve(anyLong(), anyString()))
                 .thenThrow(new RuntimeException("kb down"));
-        List<ChatMessage>[] captured = new List[1];
-        when(llmStreamService.stream(any(), anyLong(), any())).thenAnswer(inv -> {
-            captured[0] = inv.getArgument(0);
-            return reactor.core.publisher.Flux.just("Hi");
-        });
         when(messageRepository.findById(99L)).thenReturn(Optional.of(assistantPending(99L, "conv-1")));
         when(conversationRepository.findById(1L)).thenReturn(Optional.of(conv(1L, "conv-1")));
 
@@ -240,27 +238,22 @@ class ConversationServiceTest {
         spySvc.orchestrate(emitter, new ChatRequest("conv-1", "hi", "1"), 1L, conv(1L, "conv-1"), 1L, 99L,
                 new AtomicReference<>());
 
-        // 事件仍是 retrieval-step → retrieval-step → meta → token → done（召回失败仅记 fallback 轨迹，不阻断流式）
-        assertEquals("step", events.get(0).event());
-        assertEquals("step", events.get(1).event());
-        assertEquals("meta", events.get(2).event());
-        assertEquals("token", events.get(3).event());
-        assertEquals("done", events.get(4).event());
-
-        // system 消息不应包含「参考知识库」——证明 fallback 后未拼知识
-        ChatMessage system = captured[0].get(0);
-        assertTrue(system.getRole().equals("system"));
-        assertTrue(!system.getContent().contains("参考知识库"),
-                "召回失败时不应把知识塞进 system 提示，实际=" + system.getContent());
-        // 召回确实被调用过
-        verify(retrievalPort).retrieve(anyString(), anyList(), anyInt(), anyDouble());
+        // 召回确实被调用
+        verify(kbRetrievalService).retrieve(anyLong(), anyString());
+        // 短路：LLM 与工具循环均不应被调用
+        verify(llmStreamService, never()).stream(any(), anyLong(), any());
+        verify(toolLoopRunner, never()).run(any(), any(), any(), any(), any(), any());
+        // 事件含短路返回的 token（固定话术含"没有查到"）
+        boolean hit = events.stream().anyMatch(e -> "token".equals(e.event())
+                && e.content() != null && e.content().contains("没有查到"));
+        assertTrue(hit, "配KB但检索失败应短路返回固定话术，实际事件=" + events);
     }
 
     @Test
     void testOrchestrate_knowledgeRetrieveOk_injectsContextIntoSystemPrompt() {
         // 召回成功：system 提示应注入知识库内容
-        when(retrievalPort.retrieve(anyString(), anyList(), anyInt(), anyDouble()))
-                .thenReturn(List.of(new RetrievalPort.RetrievedChunk("doc-1", 0, "MCP 是模型上下文协议", 0.9)));
+        when(kbRetrievalService.retrieve(anyLong(), anyString()))
+                .thenReturn(List.of(new RetrievalResult("doc-1", 0, "MCP 是模型上下文协议", 0.9, 1, RetrievalResult.RetrievalSource.SEMANTIC, 0.9)));
         List<ChatMessage>[] captured = new List[1];
         when(llmStreamService.stream(any(), anyLong(), any())).thenAnswer(inv -> {
             captured[0] = inv.getArgument(0);
@@ -274,7 +267,7 @@ class ConversationServiceTest {
                 new AtomicReference<>());
 
         // 召回确实被调用过，且命中的是 Agent 配置的 kbId=100
-        verify(retrievalPort).retrieve(anyString(), anyList(), anyInt(), anyDouble());
+        verify(kbRetrievalService).retrieve(anyLong(), anyString());
 
         // system 消息应拼接「参考知识库内容」——证明成功分支把知识喂给模型
         ChatMessage system = captured[0].get(0);
@@ -285,7 +278,8 @@ class ConversationServiceTest {
 
     @Test
     void testOrchestrate_llmStreamFails_emitsErrorAndMarksAssistantFailed() {
-        when(retrievalPort.retrieve(anyString(), anyList(), anyInt(), anyDouble())).thenReturn(List.of());
+        when(agent.knowledgeRefs()).thenReturn(List.of()); // 不配 KB，走 LLM 失败路径
+        lenient().when(kbRetrievalService.retrieve(anyLong(), anyString())).thenReturn(List.of());
         when(llmStreamService.stream(any(), anyLong(), any()))
                 .thenReturn(reactor.core.publisher.Flux.error(
                         new BizException(ErrorCode.LLM_CALL_FAILED, "boom")));
@@ -297,12 +291,10 @@ class ConversationServiceTest {
         spySvc.orchestrate(emitter, new ChatRequest("conv-1", "hi", "1"), 1L, conv(1L, "conv-1"), 1L, 99L,
                 new AtomicReference<>());
 
-        // 事件：retrieval-step → retrieval-step → meta → error（无 done）
-        assertEquals(4, events.size());
-        assertEquals("step", events.get(0).event());
-        assertEquals("step", events.get(1).event());
-        assertEquals("meta", events.get(2).event());
-        assertEquals("error", events.get(3).event());
+        // 事件：meta → error（不配 KB 不检索，无 retrieval-step）
+        assertEquals(2, events.size());
+        assertEquals("meta", events.get(0).event());
+        assertEquals("error", events.get(1).event());
 
         // assistant 置 FAILED
         assertEquals(Message.MessageStatus.FAILED, pending.getStatus());
@@ -324,7 +316,8 @@ class ConversationServiceTest {
         SecurityContextHolder.setContext(sc);
         when(userService.resolveUserId("alice")).thenReturn(1L);
 
-        when(retrievalPort.retrieve(anyString(), anyList(), anyInt(), anyDouble())).thenReturn(List.of());
+        when(agent.knowledgeRefs()).thenReturn(List.of()); // 不配 KB，避免走"无命中短路"
+        when(kbRetrievalService.retrieve(anyLong(), anyString())).thenReturn(List.of());
         when(llmStreamService.stream(any(), anyLong(), any()))
                 .thenReturn(reactor.core.publisher.Flux.just("Hello", " world"));
 

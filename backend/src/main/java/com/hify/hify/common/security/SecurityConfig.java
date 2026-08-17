@@ -37,7 +37,8 @@ public class SecurityConfig {
                 new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))   // 无 token / 未登录 → 401（而非默认 403）
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()  // 登录窗口免卡
-                .requestMatchers("/actuator/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                .requestMatchers("/actuator/**", "/swagger-ui.html", "/swagger-ui/**",
+                    "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()
                 .anyRequest().authenticated()                                    // 其余一律要卡
             )
             .addFilterBefore(authFilter, UsernamePasswordAuthenticationFilter.class); // 闸机装在大门前

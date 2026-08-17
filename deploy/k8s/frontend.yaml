@@ -3,9 +3,9 @@
 # 说明：T4 交付物清单的 k8s 文件未列 frontend.yaml，但验收点 5 要求 k8s 栈包含前端，
 #       且模块概述明确允许「独立前端 Deployment」，故透明补此文件使全栈 k8s 完整可验。
 #
-# 镜像 hify-frontend:latest 由前端构建产出（构建方式示意，不在 T4 清单内，可于 T5 固化）：
+# 镜像 sayagent-frontend:latest 由前端构建产出（构建方式示意，不在 T4 清单内，可于 T5 固化）：
 #   cd frontend && npm install && npm run build
-#   docker build -t hify-frontend:latest -f - . <<'DF'
+#   docker build -t sayagent-frontend:latest -f - . <<'DF'
 #   FROM nginx:alpine
 #   COPY dist /usr/share/nginx/html
 #   DF
@@ -16,7 +16,7 @@ metadata:
   name: frontend
   labels:
     app: frontend
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   replicas: 1
   selector:
@@ -29,12 +29,12 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: hify-frontend:latest
+          image: sayagent-frontend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 80
-          # 挂载 nginx 配置（来自 hify-config / FRONTEND_NGINX_CONF）
+          # 挂载 nginx 配置（来自 sayagent-config / FRONTEND_NGINX_CONF）
           volumeMounts:
             - name: nginx-conf
               mountPath: /etc/nginx/conf.d/default.conf
@@ -60,7 +60,7 @@ spec:
       volumes:
         - name: nginx-conf
           configMap:
-            name: hify-config
+            name: sayagent-config
             items:
               - key: FRONTEND_NGINX_CONF
                 path: default.conf
@@ -71,7 +71,7 @@ metadata:
   name: frontend
   labels:
     app: frontend
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   type: ClusterIP
   selector:

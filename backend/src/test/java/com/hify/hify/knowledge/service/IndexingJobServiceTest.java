@@ -159,12 +159,9 @@ class IndexingJobServiceTest {
         // PARSE 仅发生一次（解析没被重复调）
         verify(contentExtractor, times(1)).extract(any(), any());
 
-        // P5：先删旧再写新（幂等）
-        int n = chunkCount(SAMPLE_TEXT);
+        // P5：replaceChunks 原子"删旧+插新"（K11 缺陷 J/B，防半套 chunk）
         InOrder order = inOrder(documentChunkRepository);
-        order.verify(documentChunkRepository).deleteByDocumentId("doc-uuid");
-        order.verify(documentChunkRepository, times(n)).saveChunk(
-                eq("doc-uuid"), eq(1L), anyInt(), anyString(), any(float[].class));
+        order.verify(documentChunkRepository).replaceChunks(eq("doc-uuid"), eq(1L), anyList());
 
         // 成功后清理断点暂存列（真实 Document 对象，直接断言状态而非 verify mock）
         assertEquals(null, d.getRawContent());
@@ -251,9 +248,8 @@ class IndexingJobServiceTest {
         assertEquals(IndexingJob.Status.SUCCESS, job.getStatus());
         assertEquals(1, job.getRetryCount());
         assertEquals(Document.DocumentStatus.INDEXED, d.getStatus());
-        // 续跑时按暂存切片写 2 块
-        verify(documentChunkRepository, times(2)).saveChunk(
-                eq("doc-uuid"), eq(1L), anyInt(), anyString(), any(float[].class));
+        // 续跑时按暂存切片原子重写（replaceChunks 内部写 2 块，测试只验证它被调用）
+        verify(documentChunkRepository).replaceChunks(eq("doc-uuid"), eq(1L), anyList());
     }
 
     @Test

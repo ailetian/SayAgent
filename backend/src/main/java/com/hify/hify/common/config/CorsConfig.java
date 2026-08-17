@@ -19,8 +19,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration
 public class CorsConfig {
 
-    /** 允许的前端来源，可改 application.yml 的 {@code hify.cors.allowed-origins} 调整（逗号分隔）。 */
-    @Value("${hify.cors.allowed-origins:http://localhost:6177}")
+    /** 允许的前端来源，可改 application.yml 的 {@code sayagent.cors.allowed-origins} 调整（逗号分隔）。 */
+    @Value("${sayagent.cors.allowed-origins:http://localhost:6177}")
     private String allowedOrigins;
 
     @Bean

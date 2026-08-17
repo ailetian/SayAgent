@@ -4,9 +4,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: hify-ingress
+  name: sayagent-ingress
   labels:
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
   annotations:
     # §5.2 SSE 友好：关闭缓冲 + 放长读写超时（连续生成长文本 120s 不够，统一 300s）
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
@@ -17,7 +17,7 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: hify.local
+    - host: sayagent.local
       http:
         paths:
           - path: /api

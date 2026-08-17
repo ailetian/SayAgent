@@ -6,7 +6,7 @@ metadata:
   name: redis
   labels:
     app: redis
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   serviceName: redis
   replicas: 1
@@ -60,7 +60,7 @@ metadata:
   name: redis
   labels:
     app: redis
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   type: ClusterIP
   selector:

@@ -9,6 +9,7 @@ import com.hify.hify.knowledge.repository.DocumentRepository;
 import com.hify.hify.knowledge.repository.IndexingJobRepository;
 import com.hify.hify.knowledge.repository.KnowledgeBaseRepository;
 import com.hify.hify.knowledge.repository.RetrievalLogRepository;
+import com.hify.hify.rbac.ResourceAccessService;
 import com.hify.hify.knowledge.web.KnowledgeBaseUpdateRequest;
 import com.hify.hify.knowledge.web.KnowledgeBaseVO;
 
@@ -48,6 +49,7 @@ class KbAdminServiceK11Test {
     @Mock AgentService agentService;
     @Mock AgentKbLinkRepository agentKbLinkRepository;
     @Mock IndexingJobRepository indexingJobRepository;
+    @Mock ResourceAccessService resourceAccessService;
 
     private KbAdminService kbAdminService;
 
@@ -56,7 +58,7 @@ class KbAdminServiceK11Test {
         loginAs("tester");
         kbAdminService = new KbAdminService(kbRepository, documentRepository, documentChunkRepository,
                 retrievalLogRepository, new KbAccessGuard(kbRepository),
-                agentService, agentKbLinkRepository, indexingJobRepository);
+                agentService, agentKbLinkRepository, indexingJobRepository, resourceAccessService);
         when(kbRepository.save(any(KnowledgeBase.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 

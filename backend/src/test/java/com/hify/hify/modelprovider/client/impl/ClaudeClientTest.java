@@ -45,7 +45,7 @@ class ClaudeClientTest {
 
     @BeforeEach
     void setUp() {
-        client = new ClaudeClient(okHttpClient);
+        client = new ClaudeClient(okHttpClient, okHttpClient);
     }
 
     private void stub(int code, String body) throws IOException {

@@ -51,7 +51,7 @@ public class RagProperties {
     /** 默认 RRF 融合常数：两路分数单位不可比，故按排名投票，k 越大越平滑。 */
     public static final int DEFAULT_RRF_K = 60;
 
-    /** 默认相似度阈值：低于它一律拒答，宁可不答不瞎编（与 hify.embedding.similarity-threshold 保持同值）。 */
+    /** 默认相似度阈值：低于它一律拒答，宁可不答不瞎编（与 sayagent.embedding.similarity-threshold 保持同值）。 */
     public static final double DEFAULT_SCORE_THRESHOLD = 0.6;
 
     /** 默认上下文扩展块数（Small-to-Big：命中块的前后各补几块原文）。 */

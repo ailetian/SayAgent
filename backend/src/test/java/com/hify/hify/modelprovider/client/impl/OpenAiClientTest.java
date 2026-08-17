@@ -46,7 +46,7 @@ class OpenAiClientTest {
 
     @BeforeEach
     void setUp() {
-        client = new OpenAiClient(okHttpClient);
+        client = new OpenAiClient(okHttpClient, okHttpClient);
     }
 
     private void stub(int code, String body) throws IOException {

@@ -45,7 +45,7 @@ class OllamaClientTest {
 
     @BeforeEach
     void setUp() {
-        client = new OllamaClient(okHttpClient);
+        client = new OllamaClient(okHttpClient, okHttpClient);
     }
 
     private void stub(int code, String body) throws IOException {

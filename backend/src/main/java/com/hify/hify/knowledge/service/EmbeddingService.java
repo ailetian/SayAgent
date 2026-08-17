@@ -54,7 +54,7 @@ public class EmbeddingService {
         for (int i = 0; i < slices.size(); i += batchSize) {
             int end = Math.min(i + batchSize, slices.size());
             List<String> batch = slices.subList(i, end);
-            List<float[]> embeddings = client.embed(batch, config);
+            List<float[]> embeddings = safeEmbed(batch, client, config);
             log.info("embedding batch size={} vectors={} expectedDim={}", batch.size(), embeddings.size(), dim);
             for (float[] v : embeddings) {
                 if (v == null || v.length != dim) {
@@ -86,7 +86,7 @@ public class EmbeddingService {
         for (int i = 0; i < slices.size(); i += batchSize) {
             int end = Math.min(i + batchSize, slices.size());
             List<String> batch = slices.subList(i, end);
-            List<float[]> embeddings = client.embed(batch, config);
+            List<float[]> embeddings = safeEmbed(batch, client, config);
             log.info("embedding batch size={} vectors={} expectedDim={}", batch.size(), embeddings.size(), dim);
             for (float[] v : embeddings) {
                 if (v == null || v.length != dim) {
@@ -97,6 +97,25 @@ public class EmbeddingService {
             }
         }
         return result;
+    }
+
+    /**
+     * 安全调用底层 embed：把供应商网络/协议层异常（例如库里只有 LLM 供应商、embedding 退化到
+     * 不支持 embedding 的厂商而导致的 404）统一翻译成 {@link ErrorCode#EMBEDDING_FAILED} 友好提示，
+     * 避免裸抛底层异常被 {@code GlobalExceptionHandler} 兜底成笼统的「系统错误」。
+     * 已经语义化的 {@link BizException} 直接透传，不重复包裹（避免提示堆叠）。
+     */
+    private List<float[]> safeEmbed(List<String> batch, ProviderClient client, ProviderConfig config) {
+        try {
+            return client.embed(batch, config);
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("embedding call failed, check Embedding provider config (e.g. local Ollama + BGE-M3)", e);
+            throw new BizException(ErrorCode.EMBEDDING_FAILED,
+                    "向量化调用失败：请检查 Embedding 模型供应商配置（需配置支持 embedding 的供应商，"
+                            + "如本地 Ollama + BGE-M3，且地址/密钥正确）");
+        }
     }
 
     /**

@@ -10,6 +10,8 @@ import com.hify.hify.agent.repository.AgentRepository;
 import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
 import com.hify.hify.modelprovider.service.ModelService;
+import com.hify.hify.rbac.ResourceAccessService;
+import com.hify.hify.skill.service.SkillService;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +34,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -39,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -59,6 +63,12 @@ class AgentServiceTest {
 
     @Mock
     private ModelService modelService;   // 跨模块依赖：只认发布接口
+
+    @Mock
+    private SkillService skillService;   // 跨模块依赖：只认发布接口（§3.2）
+
+    @Mock
+    private ResourceAccessService resourceAccessService;   // T5/T6 资源授权（rbac，接口级依赖）
 
     @InjectMocks
     private AgentService agentService;
@@ -102,8 +112,9 @@ class AgentServiceTest {
     }
 
     @Test
-    @DisplayName("listAgents：仓库返回两条，转成两个 VO")
+    @DisplayName("listAgents：ADMIN 角色，仓库返回两条，转成两个 VO（全量不过滤）")
     void testListAgents_repositoryReturnsTwo_returnsTwoVOs() {
+        loginAs("ADMIN");
         when(repository.findAll()).thenReturn(List.of(sample(1L, 1L, true, false),
                 sample(2L, 1L, true, false)));
 
@@ -115,8 +126,39 @@ class AgentServiceTest {
     }
 
     @Test
+    @DisplayName("listAgents：USER 角色，仅返回 PUBLIC ∪ 被授权 Agent（T6 过滤）")
+    void testListAgents_userSeesPublicAndGranted() {
+        loginAs("USER");
+        when(repository.findIdsByVisibility(Agent.VISIBILITY_PUBLIC)).thenReturn(List.of(10L));
+        when(resourceAccessService.visibleResourceIds(eq("tester"), any(), eq(ResourceAccessService.RESOURCE_AGENT)))
+                .thenReturn(Set.of(20L));
+        when(repository.findByIdInOrderByIdDesc(any()))
+                .thenReturn(List.of(sample(20L, 1L, true, false), sample(10L, 1L, true, false)));
+
+        List<AgentVO> vos = agentService.listAgents();
+
+        assertEquals(2, vos.size());
+        var ids = vos.stream().map(AgentVO::id).toList();
+        assertTrue(ids.containsAll(List.of(10L, 20L)));
+    }
+
+    @Test
+    @DisplayName("listAgents：USER 无任何可见授权（无 PUBLIC 也无授权），返回空列表")
+    void testListAgents_userNoAccess_empty() {
+        loginAs("USER");
+        when(repository.findIdsByVisibility(Agent.VISIBILITY_PUBLIC)).thenReturn(List.of());
+        when(resourceAccessService.visibleResourceIds(eq("tester"), any(), eq(ResourceAccessService.RESOURCE_AGENT)))
+                .thenReturn(Set.of());
+
+        List<AgentVO> vos = agentService.listAgents();
+
+        assertEquals(0, vos.size());
+    }
+
+    @Test
     @DisplayName("getAgent：存在 id，返回对应 VO")
     void testGetAgent_existingId_returnsVO() {
+        loginAs("ADMIN"); // getAgent 内部 assertAccessible 需合法身份
         when(repository.findById(1L)).thenReturn(Optional.of(sample(1L, 1L, true, false)));
 
         AgentVO vo = agentService.getAgent(1L);
@@ -141,7 +183,7 @@ class AgentServiceTest {
         AgentCreateRequest req = new AgentCreateRequest("gpt", "desc", "sys",
                 1L, "gpt-4o", null, null, true, false, 0,
                 BigDecimal.valueOf(0.70), BigDecimal.valueOf(1.00), 2048, 8192,
-                null, null);
+                null, null, null);
         when(repository.save(any(Agent.class))).thenAnswer(inv -> inv.getArgument(0));
 
         AgentVO vo = agentService.createAgent(req);
@@ -158,7 +200,7 @@ class AgentServiceTest {
         loginAs("USER");
         AgentCreateRequest req = new AgentCreateRequest("gpt", "desc", "sys",
                 1L, "gpt-4o", null, null, true, false, 0,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
 
         BizException ex = assertThrows(BizException.class, () -> agentService.createAgent(req));
         assertEquals(ErrorCode.FORBIDDEN, ex.getErrorCode());
@@ -174,7 +216,7 @@ class AgentServiceTest {
         when(repository.findById(1L)).thenReturn(Optional.of(existing));
         when(repository.save(any(Agent.class))).thenAnswer(inv -> inv.getArgument(0));
         AgentUpdateRequest req = new AgentUpdateRequest("a-new", null, null,
-                null, "gpt-4o-mini", null, null, null, null, null, null, null, null, null, null, null);
+                null, "gpt-4o-mini", null, null, null, null, null, null, null, null, null, null, null, null);
 
         AgentVO vo = agentService.updateAgent(1L, req);
 
@@ -245,7 +287,7 @@ class AgentServiceTest {
         AgentCreateRequest req = new AgentCreateRequest("gpt", "desc", "sys",
                 1L, "gpt-4o", null, null, true, false, 0,
                 BigDecimal.valueOf(0.70), BigDecimal.valueOf(1.00), 2048, 8192,
-                List.of(10L, 20L), List.of(30L));
+                List.of(10L, 20L), List.of(30L), null);
         when(repository.save(any(Agent.class))).thenAnswer(inv -> inv.getArgument(0));
 
         AgentVO vo = agentService.createAgent(req);
@@ -260,6 +302,11 @@ class AgentServiceTest {
         URL loc = AgentService.class.getProtectionDomain().getCodeSource().getLocation();
         File moduleRoot = new File(loc.toURI()).getParentFile().getParentFile();
         File agentRoot = new File(moduleRoot, "src/main/java/com/hify/hify/agent");
+        if (!agentRoot.isDirectory()) {
+            // 离树编译（javac + classpath 跑单测）时 codeSource 不在源码树内，回退到 user.dir 下的真实后端源码
+            agentRoot = new File(System.getProperty("user.dir"),
+                    "backend/src/main/java/com/hify/hify/agent");
+        }
         assertTrue(agentRoot.isDirectory(), "agent 源码目录应存在: " + agentRoot);
         List<String> violations = new ArrayList<>();
         Files.walk(agentRoot.toPath())

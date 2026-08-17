@@ -22,6 +22,7 @@ import okhttp3.ResponseBody;
 import okio.BufferedSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -47,6 +48,7 @@ public class OpenAiClient implements ProviderClient {
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     private final OkHttpClient okHttpClient;
+    private final OkHttpClient streamOkHttpClient;
     private final ProviderType providerType = ProviderType.OPENAI;
 
     @Override
@@ -66,22 +68,17 @@ public class OpenAiClient implements ProviderClient {
         texts.forEach(input::add);
         String base = config.getApiUrl().replaceAll("/$", "");
         String url = base + "/embeddings";
-        String resp = postJson(url, Map.of("Authorization", "Bearer " + config.getApiKey()), body, config.getTimeoutMs());
+        String resp = postJson(url, Map.of("Authorization", "Bearer " + config.getApiKey()), body);
         return parseEmbeddings(resp);
     }
 
-    /** 发起 JSON POST（embed 复用，超时取 ProviderConfig，失败抛 EMBEDDING_FAILED）。 */
-    private String postJson(String url, Map<String, String> headers, ObjectNode body, int timeoutMs) {
-        OkHttpClient client = new OkHttpClient.Builder()
-                .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .build();
+    /** 发起 JSON POST（embed 复用普通单例 okHttpClient，超时走全局配置，失败抛 EMBEDDING_FAILED）。 */
+    private String postJson(String url, Map<String, String> headers, ObjectNode body) {
         Request.Builder rb = new Request.Builder().url(url)
                 .addHeader("Content-Type", "application/json")
                 .post(RequestBody.create(body.toString(), JSON));
         headers.forEach(rb::addHeader);
-        try (Response response = client.newCall(rb.build()).execute()) {
+        try (Response response = okHttpClient.newCall(rb.build()).execute()) {
             String respBody = response.body() != null ? response.body().string() : "";
             if (!response.isSuccessful()) {
                 throw new BizException(ErrorCode.EMBEDDING_FAILED,
@@ -116,8 +113,10 @@ public class OpenAiClient implements ProviderClient {
         return v;
     }
 
-    public OpenAiClient(OkHttpClient okHttpClient) {
+    public OpenAiClient(@Qualifier("okHttpClient") OkHttpClient okHttpClient,
+                        @Qualifier("streamOkHttpClient") OkHttpClient streamOkHttpClient) {
         this.okHttpClient = okHttpClient;
+        this.streamOkHttpClient = streamOkHttpClient;
     }
 
     @Override
@@ -169,14 +168,7 @@ public class OpenAiClient implements ProviderClient {
                 .build();
     }
 
-    /** 流式独立 OkHttp 客户端：连接超时用配置值，读超时拉长到 10 分钟（流式 Output 不能按普通请求超时切断）。 */
-    private OkHttpClient buildStreamClient(int timeoutMs) {
-        return new OkHttpClient.Builder()
-                .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .readTimeout(Math.max(timeoutMs, 600_000), TimeUnit.MILLISECONDS)
-                .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .build();
-    }
+    // 流式复用注入的 streamOkHttpClient 单例（读超时 10 分钟），不再 per-call new（§4.8）。
 
     /**
      * 流式对话（M6 T3）：向 /chat/completions 发 stream=true 请求，逐行解析 SSE 的 data: 帧，
@@ -185,7 +177,7 @@ public class OpenAiClient implements ProviderClient {
     @Override
     public Flux<String> stream(List<ChatMessage> messages, ProviderConfig config, TokenUsage usage) {
         Request request = buildStreamRequest(messages, config);
-        OkHttpClient client = buildStreamClient(config.getTimeoutMs());
+        OkHttpClient client = this.streamOkHttpClient;
         return Flux.create(sink -> {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
@@ -262,7 +254,7 @@ public class OpenAiClient implements ProviderClient {
                 .addHeader("Content-Type", "application/json")
                 .post(body)
                 .build();
-        OkHttpClient client = buildStreamClient(config.getTimeoutMs());
+        OkHttpClient client = this.streamOkHttpClient;
         // 合并流式 tool_calls 碎片
         Map<Integer, ToolCallAcc> acc = new HashMap<>();
         StringBuilder content = new StringBuilder();

@@ -6,7 +6,7 @@ metadata:
   name: mysql
   labels:
     app: mysql
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   serviceName: mysql
   replicas: 1
@@ -26,18 +26,18 @@ spec:
               containerPort: 3306
           env:
             - name: MYSQL_DATABASE
-              value: "hify"
+              value: "sayagent"
             - name: MYSQL_USER
-              value: "hify"
+              value: "sayagent"
             - name: MYSQL_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: hify-secrets
+                  name: sayagent-secrets
                   key: mysql-password
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: hify-secrets
+                  name: sayagent-secrets
                   key: mysql-root-password
           readinessProbe:
             exec:
@@ -76,7 +76,7 @@ metadata:
   name: mysql
   labels:
     app: mysql
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   type: ClusterIP
   selector:

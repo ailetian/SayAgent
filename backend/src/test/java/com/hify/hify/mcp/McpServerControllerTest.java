@@ -50,11 +50,11 @@ class McpServerControllerTest {
     @DisplayName("createServer：合法入参返回 Result{code:0}")
     void createServer_validBody_returnsResultOk() throws Exception {
         when(service.createServer(any(McpServerCreateReq.class)))
-                .thenReturn(new McpServerVO(1L, "订单系统", "http://order.internal:8080/mcp", "SSE", 1, null, null));
+                .thenReturn(new McpServerVO(1L, "订单系统", "http://order.internal:8080/mcp", "SSE", 1, null, null, null));
 
         mockMvc.perform(post("/api/mcp/servers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"订单系统\",\"address\":\"http://order.internal:8080/mcp\",\"type\":\"SSE\",\"status\":1}"))
+                        .content("{\"name\":\"订单系统\",\"address\":\"http://order.internal:8080/mcp\",\"type\":\"SSE\",\"status\":1,\"authType\":\"NONE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.name").value("订单系统"));
@@ -64,7 +64,7 @@ class McpServerControllerTest {
     @DisplayName("listServers：返回 Result{code:0, data:[]}")
     void listServers_returnsResultOk() throws Exception {
         when(service.listServers()).thenReturn(List.of(
-                new McpServerVO(1L, "订单系统", "http://order.internal:8080/mcp", "SSE", 1, null, null)));
+                new McpServerVO(1L, "订单系统", "http://order.internal:8080/mcp", "SSE", 1, null, null, null)));
 
         mockMvc.perform(get("/api/mcp/servers"))
                 .andExpect(status().isOk())

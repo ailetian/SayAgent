@@ -102,7 +102,7 @@ class RagConfigTest {
         Binder binder = new Binder(ConfigurationPropertySources.from(loadApplicationYml()));
 
         RagProperties rag = binder.bind("rag", Bindable.of(RagProperties.class)).get();
-        EmbeddingConfig embedding = binder.bind("hify.embedding", Bindable.of(EmbeddingConfig.class)).get();
+        EmbeddingConfig embedding = binder.bind("sayagent.embedding", Bindable.of(EmbeddingConfig.class)).get();
 
         assertEquals(embedding.getSimilarityThreshold(), rag.getScoreThreshold(), DELTA);
         assertEquals(embedding.getDimension(), rag.getVectorDim());

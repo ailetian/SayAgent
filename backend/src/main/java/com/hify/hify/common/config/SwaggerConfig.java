@@ -17,7 +17,7 @@ import org.springframework.context.annotation.Configuration;
 public class SwaggerConfig {
 
     @Bean
-    public OpenAPI hifyOpenApi() {
+    public OpenAPI sayAgentOpenApi() {
         return new OpenAPI()
                 .info(new Info()
                         .title("SayAgent API")

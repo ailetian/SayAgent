@@ -21,6 +21,7 @@ import okio.BufferedSource;
 import org.slf4j.Logger;
 import reactor.core.publisher.Flux;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -43,6 +44,7 @@ public class ClaudeClient implements ProviderClient {
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     private final OkHttpClient okHttpClient;
+    private final OkHttpClient streamOkHttpClient;
     private final ProviderType providerType = ProviderType.CLAUDE;
 
     @Override
@@ -63,21 +65,16 @@ public class ClaudeClient implements ProviderClient {
         texts.forEach(input::add);
         String base = config.getApiUrl().replaceAll("/$", "");
         String url = base + "/v1/embeddings";
-        String resp = postJson(url, Map.of("x-api-key", config.getApiKey(), "anthropic-version", "2023-06-01"), body, config.getTimeoutMs());
+        String resp = postJson(url, Map.of("x-api-key", config.getApiKey(), "anthropic-version", "2023-06-01"), body);
         return parseEmbeddings(resp);
     }
 
-    private String postJson(String url, Map<String, String> headers, ObjectNode body, int timeoutMs) {
-        OkHttpClient client = new OkHttpClient.Builder()
-                .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .build();
+    private String postJson(String url, Map<String, String> headers, ObjectNode body) {
         Request.Builder rb = new Request.Builder().url(url)
                 .addHeader("Content-Type", "application/json")
                 .post(RequestBody.create(body.toString(), JSON));
         headers.forEach(rb::addHeader);
-        try (Response response = client.newCall(rb.build()).execute()) {
+        try (Response response = okHttpClient.newCall(rb.build()).execute()) {
             String respBody = response.body() != null ? response.body().string() : "";
             if (!response.isSuccessful()) {
                 throw new BizException(ErrorCode.EMBEDDING_FAILED,
@@ -114,8 +111,10 @@ public class ClaudeClient implements ProviderClient {
         return v;
     }
 
-    public ClaudeClient(OkHttpClient okHttpClient) {
+    public ClaudeClient(@Qualifier("okHttpClient") OkHttpClient okHttpClient,
+                        @Qualifier("streamOkHttpClient") OkHttpClient streamOkHttpClient) {
         this.okHttpClient = okHttpClient;
+        this.streamOkHttpClient = streamOkHttpClient;
     }
 
     @Override
@@ -222,11 +221,7 @@ public class ClaudeClient implements ProviderClient {
     @Override
     public Flux<String> stream(List<ChatMessage> messages, ProviderConfig config, TokenUsage usage) {
         Request request = buildStreamRequest(messages, config);
-        OkHttpClient client = new OkHttpClient.Builder()
-                .connectTimeout(config.getTimeoutMs(), TimeUnit.MILLISECONDS)
-                .readTimeout(Math.max(config.getTimeoutMs(), 600_000), TimeUnit.MILLISECONDS)
-                .writeTimeout(config.getTimeoutMs(), TimeUnit.MILLISECONDS)
-                .build();
+        OkHttpClient client = this.streamOkHttpClient;
         return Flux.create(sink -> {
             try (Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful()) {

@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
  *
  * <p>大白话：返回给前端的「通讯录名片」。{@code address} 是内部服务地址而非秘钥，
  * 按 §7.11 规则37 可正常返回（若日后增加秘钥字段须 {@code @JsonIgnore} 或专用 VO 屏蔽）。
+ * {@code dataSensitivity} 是「分类标签」非秘钥，可正常返回，供 T6 前端授权知情展示徽章（§7.11 规则37）。
  */
 public record McpServerVO(
         Long id,
@@ -17,7 +18,8 @@ public record McpServerVO(
         String type,
         Integer status,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt) {
+        LocalDateTime updatedAt,
+        String dataSensitivity) {
 
     /** 把内部实体翻译成对外 VO。 */
     public static McpServerVO from(McpServer s) {
@@ -28,6 +30,7 @@ public record McpServerVO(
                 s.getType(),
                 s.getStatus(),
                 s.getCreatedAt(),
-                s.getUpdatedAt());
+                s.getUpdatedAt(),
+                s.getDataSensitivity());
     }
 }

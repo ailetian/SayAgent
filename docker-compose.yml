@@ -6,9 +6,9 @@ services:
   mysql:
     image: mysql:8.0
     environment:
-      MYSQL_DATABASE: hify
-      MYSQL_USER: hify
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-hify}
+      MYSQL_DATABASE: sayagent
+      MYSQL_USER: sayagent
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sayagent}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
     ports:
       - "3306:3306"
@@ -34,16 +34,16 @@ services:
   pgvector:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: hify_vector
-      POSTGRES_USER: hify
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hify}
+      POSTGRES_DB: sayagent_vector
+      POSTGRES_USER: sayagent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sayagent}
     ports:
       - "5432:5432"
     volumes:
       - pg-data:/var/lib/postgresql/data
       - ./deploy/initdb:/docker-entrypoint-initdb.d   # 首次启动自动启用 vector 扩展（见 T6）
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hify"]
+      test: ["CMD-SHELL", "pg_isready -U sayagent"]
       interval: 5s
       retries: 10
 

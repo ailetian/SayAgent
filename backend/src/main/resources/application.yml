@@ -14,9 +14,9 @@ spring:
       max-request-size: 20MB
   # ===== 业务主库 MySQL（Flyway 默认管这个，JPA 也用这个 @Primary 数据源）=====
   datasource:
-    url: jdbc:mysql://localhost:3306/hify?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
-    username: hify
-    password: ${MYSQL_PASSWORD:hify}
+    url: jdbc:mysql://localhost:3306/sayagent?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
+    username: sayagent
+    password: ${MYSQL_PASSWORD:sayagent}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
@@ -33,9 +33,9 @@ spring:
   # ===== 第二数据源 PostgreSQL 向量库（M5 知识库写向量用）=====
   # 注意：Hikari 要求用 jdbc-url（不是 url），否则连接串不会生效。
   datasource.pg:
-    jdbc-url: jdbc:postgresql://localhost:5432/hify_vector
-    username: hify
-    password: ${POSTGRES_PASSWORD:hify}
+    jdbc-url: jdbc:postgresql://localhost:5432/sayagent_vector
+    username: sayagent
+    password: ${POSTGRES_PASSWORD:sayagent}
     driver-class-name: org.postgresql.Driver
 
   # ===== Redis（缓存 / M2 起存 token）=====
@@ -46,22 +46,27 @@ spring:
 
 # ===== 跨域（§5.1，放开本地前端来源）=====
 # 多来源用逗号分隔；生产可收紧为前端正式域名。
-# 注意：hify.* 是业务自定义配置，必须放在 spring: 之外（顶层），否则会被解析成 spring.hify.*
-hify:
+# 注意：sayagent.* 是业务自定义配置，必须放在 spring: 之外（顶层），否则会被解析成 spring.sayagent.*
+sayagent:
   cors:
     allowed-origins: http://localhost:6177
-  # ===== JWT 密钥配置（§9：密钥走配置，生产用环境变量 HIFY_JWT_SECRET 注入；此处为开发默认值）=====
+  # ===== JWT 密钥配置（§9：密钥走配置，生产用环境变量 SAYAGENT_JWT_SECRET 注入；此处为开发默认值）=====
   jwt:
-    secret: ${HIFY_JWT_SECRET:dev-only-secret-key-please-change-in-prod-32bytes!!}
+    secret: ${SAYAGENT_JWT_SECRET:dev-only-secret-key-please-change-in-prod-32bytes!!}
     expiration-ms: 7200000          # token 有效期 2h
-  # ===== 默认管理员种子密码（AdminSeedRunner 启动时播种 admin 账号用；生产用环境变量 HIFY_ADMIN_PASSWORD 覆盖）=====
+  # ===== 默认管理员种子密码（AdminSeedRunner 启动时播种 admin 账号用；生产用环境变量 SAYAGENT_ADMIN_PASSWORD 覆盖）=====
   admin:
-    password: ${HIFY_ADMIN_PASSWORD:admin123}
+    password: ${SAYAGENT_ADMIN_PASSWORD:admin123}
   # ===== OkHttp 单例超时（§4.8，T3 使用；可在此覆盖默认值）=====
+  # 统一档位（2026-08-16 owner 决策：不做厂商分级，统一设置）：
+  #   connect 5s —— 建链/握手超时，端点不可达时快速失败去走降级，比 3s 略宽更稳
+  #   read    90s —— 统一读超时，长生成不被中途掐断；流式 Bean 单独拉到 600s
+  #   write   30s
   okhttp:
-    connect-timeout-seconds: 10
-    read-timeout-seconds: 60
+    connect-timeout-seconds: 5
+    read-timeout-seconds: 90
     write-timeout-seconds: 30
+    stream-read-timeout-seconds: 600
   # ===== Embedding 配置（M5 T2：向量化维度/阈值/切块/批大小）=====
   # 注意（K2）：RAG 引擎参数的唯一真相源是下方顶层 rag: 段；本段是 M5 T2 EmbeddingService 的遗留入参，
   # dimension/similarity-threshold 与 rag.vector-dim/rag.score-threshold 保持同值，
@@ -87,7 +92,7 @@ rag:
   retrieval-top-k: 10                # 检索参数：向量路/FTS 路各召回条数
   final-top-n: 4                     # 检索参数：融合排序后最终喂给大模型的片段数
   rrf-k: 60                          # 检索参数：RRF 融合常数（两路分数不可比，按排名投票）
-  score-threshold: 0.6               # 检索参数：低于此分一律拒答（与 hify.embedding.similarity-threshold 同值）
+  score-threshold: 0.6               # 检索参数：低于此分一律拒答（与 sayagent.embedding.similarity-threshold 同值）
   context-expand: 1                  # 检索参数：Small-to-Big，命中块前后各补几块原文
   fts:
     enabled: true                    # FTS 路人工总开关；置 false 才退化成纯向量单路
@@ -141,7 +146,7 @@ resilience4j:
   timelimiter:
     configs:
       default:
-        timeout-duration: 60s
+        timeout-duration: 90s
     instances:
       OPENAI: { base-config: default }
       CLAUDE: { base-config: default }

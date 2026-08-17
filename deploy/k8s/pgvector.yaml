@@ -7,7 +7,7 @@ metadata:
   name: pgvector
   labels:
     app: pgvector
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   serviceName: pgvector
   replicas: 1
@@ -27,17 +27,17 @@ spec:
               containerPort: 5432
           env:
             - name: POSTGRES_DB
-              value: "hify_vector"
+              value: "sayagent_vector"
             - name: POSTGRES_USER
-              value: "hify"
+              value: "sayagent"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: hify-secrets
+                  name: sayagent-secrets
                   key: postgres-password
           readinessProbe:
             exec:
-              command: ["sh", "-c", "pg_isready -U hify"]
+              command: ["sh", "-c", "pg_isready -U sayagent"]
             initialDelaySeconds: 15
             periodSeconds: 10
             failureThreshold: 5
@@ -62,7 +62,7 @@ spec:
       volumes:
         - name: initdb
           configMap:
-            name: hify-config
+            name: sayagent-config
             items:
               - key: PGVECTOR_INITDB_SQL
                 path: 01_enable_vector.sql
@@ -81,7 +81,7 @@ metadata:
   name: pgvector
   labels:
     app: pgvector
-    app.kubernetes.io/part-of: hify
+    app.kubernetes.io/part-of: sayagent
 spec:
   type: ClusterIP
   selector:

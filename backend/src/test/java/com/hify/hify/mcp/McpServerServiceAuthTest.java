@@ -60,7 +60,8 @@ class McpServerServiceAuthTest {
     }
 
     private McpServerCreateReq buildReq() {
-        return new McpServerCreateReq("订单系统", "http://order.internal:8080/mcp", "SSE", 1);
+        // 记录新增 authType(必填) / authConfig(可选) 两个位置参数（M10/T1）
+        return new McpServerCreateReq("订单系统", "http://order.internal:8080/mcp", "SSE", 1, "NONE", null, "INTERNAL");
     }
 
     @Test

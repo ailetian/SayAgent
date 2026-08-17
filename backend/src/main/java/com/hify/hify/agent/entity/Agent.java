@@ -34,6 +34,11 @@ import java.util.List;
 @NoArgsConstructor
 public class Agent extends BaseEntity {
 
+    /** 可见性：全员可见（§2.1）。 */
+    public static final String VISIBILITY_PUBLIC = "PUBLIC";
+    /** 可见性：仅授权可见（默认，secure by default §2.1）。 */
+    public static final String VISIBILITY_RESTRICTED = "RESTRICTED";
+
     @Column(nullable = false, length = 50)
     private String name;
 
@@ -103,4 +108,11 @@ public class Agent extends BaseEntity {
     @Convert(converter = RefsJsonConverter.class)
     @Column(name = "skill_refs", columnDefinition = "text")
     private List<Long> skillRefs = new ArrayList<>();
+
+    /**
+     * 可见性（T6 列表过滤的唯一真相源，§2.1）：PUBLIC=全员可见 / RESTRICTED=仅授权可见（默认）。
+     * V31 已为该列建索引 idx_visibility；列表过滤以本字段为准。
+     */
+    @Column(name = "visibility", nullable = false, length = 20)
+    private String visibility = VISIBILITY_RESTRICTED;
 }

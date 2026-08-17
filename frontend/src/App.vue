@@ -46,7 +46,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 
@@ -63,14 +63,16 @@ const activeMenu = computed(() => '/' + (route.path.split('/')[1] || ''))
 const currentTitle = computed(() => route.meta.title || 'SayAgent')
 const initial = computed(() => (auth.user?.username || '?').charAt(0).toUpperCase())
 
-const nav = [
-  { path: '/chat', label: '对话' },
-  { path: '/agents', label: 'Agent' },
-  { path: '/knowledge', label: '知识库' },
-  { path: '/models', label: '模型' },
-  { path: '/mcp', label: 'MCP' },
-  { path: '/skills', label: '技能库' }
-]
+// 侧边栏项 = 后端 /api/me.menus 动态下发（M9/T4，不再前端写死 6 项）。
+// 菜单视图字段：code / title / route / icon；映射到导航需要的 {path, label}。
+const nav = computed(() =>
+  (auth.menus || []).map((m) => ({ path: m.route, label: m.title, code: m.code, icon: m.icon }))
+)
+
+// 已登录时拉一次身份快照（角色 + 菜单），驱动动态侧边栏（刷新后仍在）。
+onMounted(() => {
+  if (auth.isLoggedIn) auth.fetchMe()
+})
 
 function onLogout() {
   auth.logout()

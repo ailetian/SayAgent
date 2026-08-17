@@ -33,7 +33,7 @@ public class IndexingExecutorConfig {
     /** 解析/切片池：核心 2、最大 4、队列 50，CallerRunsPolicy 背压。 */
     @Bean("parseExecutor")
     public ExecutorService parseExecutor() {
-        ThreadFactory factory = new CustomizableThreadFactory("hify-parse-");
+        ThreadFactory factory = new CustomizableThreadFactory("sayagent-parse-");
         return new ThreadPoolExecutor(
                 2, 4, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(50),

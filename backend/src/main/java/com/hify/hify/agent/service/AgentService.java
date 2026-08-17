@@ -1,5 +1,6 @@
 package com.hify.hify.agent.service;
 
+import com.hify.hify.agent.dto.AgentAccessGrantRequest;
 import com.hify.hify.agent.dto.AgentCreateRequest;
 import com.hify.hify.agent.dto.AgentUpdateRequest;
 import com.hify.hify.agent.dto.AgentVO;
@@ -7,17 +8,26 @@ import com.hify.hify.agent.entity.Agent;
 import com.hify.hify.agent.repository.AgentRepository;
 import com.hify.hify.common.exception.BizException;
 import com.hify.hify.common.exception.ErrorCode;
+import com.hify.hify.common.security.AuthContext;
+import com.hify.hify.common.tool.DataSensitivity;
+import com.hify.hify.common.tool.RiskLevel;
+import com.hify.hify.mcp.McpService;
+import com.hify.hify.mcp.dto.ToolDefinition;
 import com.hify.hify.modelprovider.service.ModelService;
+import com.hify.hify.rbac.ResourceAccessService;
 import com.hify.hify.skill.service.SkillService;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Agent 业务（M4/T2，§3.4 分层纪律：Controller 只调本服务，真正增删改查在这里）。
@@ -44,18 +54,78 @@ public class AgentService {
     /** 跨模块依赖：skill 发布的「技能管理」API（仅依赖 Service，不触碰 skill 内部 entity/repository，§3.2）。 */
     private final SkillService skillService;
 
-    /** 列出全部 Agent（软删除已由 @SQLRestriction 过滤）。 */
+    /** T5：资源授权服务（rbac），建 Agent 后给创建者本人写全权授权行（跨模块，接口级依赖 §3.2）。 */
+    private final ResourceAccessService resourceAccessService;
+
+    /** T4：跨模块依赖 mcp 发布的「工具发现」API（仅接口，不触碰 McpClientManager/McpServer 内部类，§3.2）。
+     *  用于聚合某 Agent 挂载 MCP Server 旗下工具的数据敏感度/危险度，供 T6 授权页知情（§2.1 授权知情）。 */
+    private final McpService mcpService;
+
+    /**
+     * 列出全部 Agent（T6 可见性过滤 §2.1：ADMIN 看全部，普通用户只看到 PUBLIC ∪ 自己被授权；软删除已由 @SQLRestriction 过滤）。
+     *
+     * <p>大白话：和知识库列表同理——管理员能看到所有 Agent（含 RESTRICTED），普通用户只能看到
+     * {@code visibility='PUBLIC'} 的或自己被 {@code resource_access} 显式授权的。复用 T5 的
+     * {@link ResourceAccessService#visibleResourceIds} 拿授权 id 集合。
+     */
     public List<AgentVO> listAgents() {
-        return repository.findAll().stream()
-                .map(AgentVO::from)
+        if (AuthContext.isAdmin()) {
+            return repository.findAll().stream()
+                    .map(a -> AgentVO.from(a, aggregateSensitivity(a)))
+                    .toList();
+        }
+        Set<Long> visibleIds = computeVisibleAgentIds();
+        if (visibleIds.isEmpty()) {
+            return List.of();
+        }
+        return repository.findByIdInOrderByIdDesc(visibleIds).stream()
+                .map(a -> AgentVO.from(a, aggregateSensitivity(a)))
                 .toList();
     }
 
-    /** 查看单个 Agent；不存在抛 AGENT_NOT_FOUND。 */
+    /**
+     * 计算当前用户可见 Agent id = PUBLIC ∪ 显式授权（T5 visibleResourceIds）；ADMIN 不走此方法。
+     */
+    private Set<Long> computeVisibleAgentIds() {
+        Set<Long> ids = new LinkedHashSet<>(
+                repository.findIdsByVisibility(Agent.VISIBILITY_PUBLIC));
+        Set<Long> granted = resourceAccessService.visibleResourceIds(
+                AuthContext.currentUsername(), AuthContext.roleSet(), ResourceAccessService.RESOURCE_AGENT);
+        if (granted != null) {
+            ids.addAll(granted);
+        }
+        return ids;
+    }
+
+    /**
+     * 可见性闸门（§2.1：ADMIN 全权 / PUBLIC 全员可见 / 否则须有显式授权=个人∪角色）。
+     * 不可访问直接抛 {@code FORBIDDEN}。
+     * <p>大白话：列表看不到的 Agent，不能直接拿 id 绕过——对话入口（{@code getAgent}）和
+     * {@code GET /api/agents/{id}} 都要过这关，堵住"知道 id 就能用/拉配置"的越权。
+     */
+    public void assertAccessible(Long agentId) {
+        if (AuthContext.isAdmin()) {
+            return; // ADMIN 对所有 Agent 隐式全权（含 RESTRICTED）
+        }
+        Agent a = repository.findById(agentId)
+                .orElseThrow(() -> new BizException(ErrorCode.AGENT_NOT_FOUND, "id=" + agentId));
+        if (Agent.VISIBILITY_PUBLIC.equals(a.getVisibility())) {
+            return;
+        }
+        Set<Long> granted = resourceAccessService.visibleResourceIds(
+                AuthContext.currentUsername(), AuthContext.roleSet(), ResourceAccessService.RESOURCE_AGENT);
+        if (granted != null && granted.contains(agentId)) {
+            return;
+        }
+        throw new BizException(ErrorCode.FORBIDDEN, "无权使用该 Agent: " + agentId);
+    }
+
+    /** 查看单个 Agent；不存在抛 AGENT_NOT_FOUND，无权限抛 FORBIDDEN（§2.1 可见性）。 */
     public AgentVO getAgent(Long id) {
+        assertAccessible(id);
         Agent a = repository.findById(id)
                 .orElseThrow(() -> new BizException(ErrorCode.AGENT_NOT_FOUND, "id=" + id));
-        return AgentVO.from(a);
+        return AgentVO.from(a, aggregateSensitivity(a));
     }
 
     /** 新增 Agent（仅 ADMIN）；先跨模块校验模型厂商存在。 */
@@ -90,7 +160,10 @@ public class AgentService {
         } else {
             a.setDefaultAgent(false);
         }
-        return AgentVO.from(repository.save(a));
+        Agent saved = repository.save(a);
+        // T5：创建者自授权——给创建者本人写一行全权授权（保证自己能继续管理，§2.1 创建者权益）
+        resourceAccessService.grantCreator(ResourceAccessService.RESOURCE_AGENT, saved.getId(), saved.getCreatedBy());
+        return AgentVO.from(saved);
     }
 
     /** 修改 Agent（仅 ADMIN）；仅更新请求中非 null 的字段。 */
@@ -265,5 +338,174 @@ public class AgentService {
         if (a.getKnowledgeRefs() != null && a.getKnowledgeRefs().remove(kbId)) {
             repository.save(a);
         }
+    }
+
+    /**
+     * 聚合某 Agent 携带工具的数据敏感度（M10/T4，§2.1 授权知情）。
+     *
+     * <p>大白话：把这个 Agent 挂的 MCP Server 旗下所有工具的「数据敏感度 + 危险度」取最高级，
+     * 算出"本 Agent 含哪些敏感域工具、最高到什么级别"，供 T6 前端授权页摊开知情、高危须强制确认。
+     * 内置工具（current-time 等）默认 INTERNAL / L0，作为地板；仅当挂载了高敏感 MCP 工具时才会升高。
+     *
+     * <p>跨模块纪律（§3.2）：仅经 mcp 已发布的 {@link McpService#listTools(Long)} 接口取工具定义，
+     * <b>禁止</b> import conversation 的 {@code ToolRegistry}/{@code McpToolAdapter} 等实现类。
+     * MCP 工具的 dataSensitivity 由管理员在注册 Server 时人工标注（server 级），经
+     * {@code McpClientManager → McpToolAdapter} 透传到工具定义（本方法只读结果）。
+     *
+     * @param agentId Agent id
+     * @return 聚合结果（最高数据敏感度、最高危险度、含 FINANCE_HR/CONFIDENTIAL 工具数）
+     */
+    public AgentSensitivitySummary aggregateSensitivity(Long agentId) {
+        Agent a = repository.findById(agentId)
+                .orElseThrow(() -> new BizException(ErrorCode.AGENT_NOT_FOUND, "id=" + agentId));
+        return aggregateSensitivity(a);
+    }
+
+    /**
+     * 聚合（接收已加载实体，避免列表场景重复查库）。
+     */
+    private AgentSensitivitySummary aggregateSensitivity(Agent a) {
+        // 地板：内置工具默认 INTERNAL / L0（即便没有挂载任何 MCP Server 也至少这个级别）
+        DataSensitivity maxDs = DataSensitivity.INTERNAL;
+        RiskLevel maxRl = RiskLevel.L0_READONLY_SAFE;
+        long financeHrCount = 0;
+        long confidentialCount = 0;
+        if (a.getToolRefs() != null) {
+            for (Long serverId : a.getToolRefs()) {
+                List<ToolDefinition> defs = mcpService.listTools(serverId); // 失败内部降级为空列表，不抛（§4.5）
+                if (defs != null) {
+                    for (ToolDefinition td : defs) {
+                        DataSensitivity ds = td.dataSensitivity();
+                        RiskLevel rl = td.riskLevel();
+                        if (ds != null && ds.ordinal() > maxDs.ordinal()) {
+                            maxDs = ds;
+                        }
+                        if (rl != null && rl.ordinal() > maxRl.ordinal()) {
+                            maxRl = rl;
+                        }
+                        if (ds == DataSensitivity.FINANCE_HR) {
+                            financeHrCount++;
+                        } else if (ds == DataSensitivity.CONFIDENTIAL) {
+                            confidentialCount++;
+                        }
+                    }
+                }
+            }
+        }
+        return new AgentSensitivitySummary(maxDs, maxRl, financeHrCount, confidentialCount);
+    }
+
+    /**
+     * 列出某 Agent 携带的每个工具的「危险度 + 数据敏感度」快照（M10/T6，供前端授权页风险预览卡渲染）。
+     *
+     * <p>大白话：把上面的聚合摊开成逐条明细——前端据此逐工具展示色标（如「读薪酬 L0 财务·人事」）。
+     * 数据来源与 {@link #aggregateSensitivity} 完全一致（仅经 mcp 接口取，不反向依赖 conversation，§3.2）。
+     *
+     * @param agentId Agent id
+     * @return 每个工具一行（name / description / riskLevel 枚举名 / dataSensitivity 枚举名）
+     */
+    public List<AgentToolSensitivity> listToolSensitivity(Long agentId) {
+        Agent a = repository.findById(agentId)
+                .orElseThrow(() -> new BizException(ErrorCode.AGENT_NOT_FOUND, "id=" + agentId));
+        List<AgentToolSensitivity> result = new ArrayList<>();
+        if (a.getToolRefs() != null) {
+            for (Long serverId : a.getToolRefs()) {
+                List<ToolDefinition> defs = mcpService.listTools(serverId); // 降级空列表，不抛（§4.5）
+                if (defs != null) {
+                    for (ToolDefinition td : defs) {
+                        String rl = td.riskLevel() != null ? td.riskLevel().name() : RiskLevel.L1_WRITE_REVERSIBLE.name();
+                        String ds = td.dataSensitivity() != null ? td.dataSensitivity().name() : DataSensitivity.INTERNAL.name();
+                        result.add(new AgentToolSensitivity(td.name(), td.description(), rl, ds));
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 生成授权审计用的「资源风险摘要」文案（M10/T6，§7.11 留痕）。
+     *
+     * <p>大白话：把该 Agent 携带的敏感/高危工具浓缩成一句话，如
+     * 「含敏感域工具2个: 读薪酬(财务·人事)/调薪资(财务·人事); 含高危工具1个: 取消订单(L2不可逆)」。
+     * 仅当确实含敏感/高危工具时才写具体工具，否则写「无敏感/高危工具」（便于审计一眼看清）。
+     *
+     * @param agentId Agent id
+     * @return 风险摘要文案（非空）
+     */
+    private String describeAgentRisk(Long agentId) {
+        List<AgentToolSensitivity> tools = listToolSensitivity(agentId);
+        List<String> sensitive = new ArrayList<>();
+        List<String> highRisk = new ArrayList<>();
+        for (AgentToolSensitivity t : tools) {
+            if ("FINANCE_HR".equals(t.dataSensitivity()) || "CONFIDENTIAL".equals(t.dataSensitivity())) {
+                sensitive.add(t.name() + "(" + dsDesc(t.dataSensitivity()) + ")");
+            }
+            if ("L2_IRREVERSIBLE".equals(t.riskLevel()) || "L3_HIGH_RISK".equals(t.riskLevel())) {
+                highRisk.add(t.name() + "(" + rlDesc(t.riskLevel()) + ")");
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        if (!sensitive.isEmpty()) {
+            sb.append("含敏感域工具").append(sensitive.size()).append("个: ").append(String.join("/", sensitive));
+        }
+        if (!highRisk.isEmpty()) {
+            if (sb.length() > 0) sb.append("; ");
+            sb.append("含高危工具").append(highRisk.size()).append("个: ").append(String.join("/", highRisk));
+        }
+        return sb.length() > 0 ? sb.toString() : "无敏感/高危工具";
+    }
+
+    /** 数据敏感度枚举名 → 中文含义（审计文案用）。 */
+    private String dsDesc(String name) {
+        try {
+            return DataSensitivity.valueOf(name).desc;
+        } catch (IllegalArgumentException e) {
+            return name;
+        }
+    }
+
+    /** 危险度枚举名 → 中文含义（审计文案用）。 */
+    private String rlDesc(String name) {
+        try {
+            return RiskLevel.valueOf(name).desc;
+        } catch (IllegalArgumentException e) {
+            return name;
+        }
+    }
+
+    /**
+     * 授权某 Agent 给某主体，并写含风险摘要的审计（M10/T6，§2.1 授权知情 + §7.11 留痕）。
+     *
+     * <p>大白话：管理员在授权页点「确认」后，这里先核权限（仅管理员/管理者可授权，禁止给 ADMIN 角色授权），
+     * 算出该 Agent 携带的敏感工具摘要，再委托 rbac 落库 + 写审计。审计摘要由后端计算，<b>不信任前端</b>任何标记，
+     * 满足 §4「后端硬闸」要求。
+     *
+     * @param agentId Agent id
+     * @param req     授权请求（主体类型/id + 四权）
+     */
+    @Transactional
+    public void grantAccess(Long agentId, AgentAccessGrantRequest req) {
+        // 权限核：仅 ADMIN 或该 Agent 管理者可授权（rbac 服务层再核，§7.11）
+        resourceAccessService.requireManager(ResourceAccessService.RESOURCE_AGENT, agentId);
+        // 后端计算风险摘要（不依赖前端），再委托 rbac 落库 + 写审计（grant 内部会再拦 ADMIN 主体）
+        String riskSummary = describeAgentRisk(agentId);
+        resourceAccessService.grant(req.principalType(), req.principalId(), ResourceAccessService.RESOURCE_AGENT,
+                agentId, req.canRead(), req.canWrite(), req.canUse(), req.canEdit(), riskSummary);
+    }
+
+    /**
+     * Agent 聚合敏感度结果（M10/T4，供 T6 前端授权页知情）。
+     *
+     * @param maxDataSensitivity 本 Agent 工具最高数据敏感度（PUBLIC→FINANCE_HR 递增）
+     * @param maxRiskLevel       本 Agent 工具最高危险度（L0→L3 递增）
+     * @param financeHrToolCount 含 FINANCE_HR 域工具的数量
+     * @param confidentialToolCount 含 CONFIDENTIAL 域工具的数量
+     */
+    public record AgentSensitivitySummary(
+            DataSensitivity maxDataSensitivity,
+            RiskLevel maxRiskLevel,
+            long financeHrToolCount,
+            long confidentialToolCount) {
     }
 }

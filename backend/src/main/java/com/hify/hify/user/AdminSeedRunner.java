@@ -12,8 +12,8 @@ import org.springframework.stereotype.Component;
  * 默认管理员「播种器」（应用启动即跑一次，§9 运维约定）。
  *
  * <p>大白话：为了让 Demo 开箱即用，应用一启动就检查库里有没有 {@code admin} 账号；
- * 没有就种一个（密码来自配置 {@code hify.admin.password}，默认 {@code admin123}，生产用
- * {@code HIFY_ADMIN_PASSWORD} 环境变量覆盖）。已存在则跳过，绝不重复插入。
+ * 没有就种一个（密码来自配置 {@code sayagent.admin.password}，默认 {@code admin123}，生产用
+ * {@code SAYAGENT_ADMIN_PASSWORD} 环境变量覆盖）。已存在则跳过，绝不重复插入。
  *
  * <p>密码安全：存的是 BCrypt 密文，不是明文（§7.11）。密文通过
  * {@link PasswordEncoderConfig} 这个保险柜现编现用。
@@ -28,7 +28,7 @@ public class AdminSeedRunner implements CommandLineRunner {
     private final UserRepository userRepository;
     private final PasswordEncoderConfig passwordEncoderConfig;
 
-    @Value("${hify.admin.password:admin123}")
+    @Value("${sayagent.admin.password:admin123}")
     private String adminPassword;
 
     @Override

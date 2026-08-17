@@ -1,0 +1,1 @@
+import{r}from"./request-D0OrnSt3.js";function c(){return r.get("/mcp/servers")}function p(e){return r.post("/mcp/servers",e)}function n(e,t){return r.put(`/mcp/servers/${e}`,t)}function u(e){return r.delete(`/mcp/servers/${e}`)}export{p as c,u as d,c as l,n as u};

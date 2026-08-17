@@ -173,4 +173,21 @@ export function retryIndexingBatch(kbId, batchId) {
   return kbRequest.post(`/knowledge/${kbId}/indexing-jobs/retry-batch`, null, { params: { batchId } })
 }
 
+// ===== M9/T7 授权管理端点封装（POST/DELETE/GET /api/resource-access，路径以 ResourceAccessController 注解为唯一事实源）=====
+
+// 列出某资源当前授权（管理者可见）：GET /api/resource-access?resourceType=KB&resourceId=123
+export function listGrants(resourceType, resourceId) {
+  return kbRequest.get('/resource-access', { params: { resourceType, resourceId } })
+}
+
+// 授权（已存在则更新，幂等）：POST /api/resource-access
+export function grantAccess(payload) {
+  return kbRequest.post('/resource-access', payload)
+}
+
+// 撤销授权（DELETE 带 body）：DELETE /api/resource-access
+export function revokeAccess(payload) {
+  return kbRequest.delete('/resource-access', { data: payload })
+}
+
 export default kbRequest

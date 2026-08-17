@@ -93,8 +93,11 @@ export const useChatStore = defineStore('chat', () => {
 
   async function openConv(c) {
     currentId.value = c.conversationId
-    // 还原该会话绑定的 Agent（避免继续对话时误用默认 Agent）
-    if (c.agentId) agentId.value = c.agentId
+    // 还原该会话绑定的 Agent（避免继续对话时误用默认 Agent）；
+    // 但该 Agent 必须对当前用户可见，否则回退默认（防止用已被取消授权的 Agent 继续对话）
+    if (c.agentId && agents.value.some((a) => String(a.id) === String(c.agentId))) {
+      agentId.value = c.agentId
+    }
     error.value = ''
     await loadHistory(c.conversationId)
   }

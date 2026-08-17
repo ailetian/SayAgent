@@ -16,6 +16,7 @@ import com.hify.hify.knowledge.web.HealthVO;
 import com.hify.hify.knowledge.web.KnowledgeBaseCreateRequest;
 import com.hify.hify.knowledge.web.KnowledgeBaseVO;
 import com.hify.hify.knowledge.web.PageVO;
+import com.hify.hify.rbac.ResourceAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -59,6 +61,7 @@ class KbAdminServiceTest {
     @Mock AgentService agentService;
     @Mock AgentKbLinkRepository agentKbLinkRepository;
     @Mock IndexingJobRepository indexingJobRepository;
+    @Mock ResourceAccessService resourceAccessService;
 
     private KbAdminService kbAdminService;
 
@@ -67,7 +70,7 @@ class KbAdminServiceTest {
         loginAs("tester");
         kbAdminService = new KbAdminService(kbRepository, documentRepository, documentChunkRepository,
                 retrievalLogRepository, new KbAccessGuard(kbRepository),
-                agentService, agentKbLinkRepository, indexingJobRepository);
+                agentService, agentKbLinkRepository, indexingJobRepository, resourceAccessService);
     }
 
     private void loginAs(String username, String... roles) {
@@ -130,6 +133,7 @@ class KbAdminServiceTest {
 
     @Test
     void listBases_firstPageFull_setsHasMoreAndNextCursor() {
+        loginAs("admin", "ADMIN");
         List<KnowledgeBase> three = List.of(kb(3, "tester"), kb(2, "tester"), kb(1, "tester"));
         when(kbRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(three));
 
@@ -142,6 +146,7 @@ class KbAdminServiceTest {
 
     @Test
     void listBases_lastPage_noCursor() {
+        loginAs("admin", "ADMIN");
         when(kbRepository.findAll(any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(kb(3, "tester"))));
 
@@ -154,6 +159,7 @@ class KbAdminServiceTest {
 
     @Test
     void listBases_withLastId_usesKeysetQueryNotOffset() {
+        loginAs("admin", "ADMIN");
         when(kbRepository.findByIdLessThanOrderByIdDesc(eq(5L), any(Pageable.class)))
                 .thenReturn(List.of(kb(4, "tester")));
 
@@ -166,6 +172,7 @@ class KbAdminServiceTest {
 
     @Test
     void listBases_limitClampedToHundred() {
+        loginAs("admin", "ADMIN");
         List<KnowledgeBase> many = new ArrayList<>();
         for (int i = 0; i < 101; i++) {
             many.add(kb(200 - i, "tester"));
@@ -243,6 +250,37 @@ class KbAdminServiceTest {
         BizException ex = assertThrows(BizException.class, () -> kbAdminService.health(1L));
 
         assertEquals(ErrorCode.FORBIDDEN, ex.getErrorCode());
+    }
+
+    // ===================== T6 可见性过滤 =====================
+
+    @Test
+    void listBases_userSeesPublicAndGranted_mergesVisibilityAndAccess() {
+        loginAs("alice", "USER");
+        when(kbRepository.findIdsByVisibility(KnowledgeBase.VISIBILITY_PUBLIC)).thenReturn(List.of(10L, 11L));
+        when(resourceAccessService.visibleResourceIds(eq("alice"), any(), eq(ResourceAccessService.RESOURCE_KB)))
+                .thenReturn(Set.of(20L));
+        when(kbRepository.findByIdInOrderByIdDesc(any(), any()))
+                .thenReturn(List.of(kb(20, "alice"), kb(11, "alice"), kb(10, "alice")));
+
+        PageVO<KnowledgeBaseVO> page = kbAdminService.listBases(null, 20);
+
+        assertEquals(3, page.items().size());
+        var names = page.items().stream().map(KnowledgeBaseVO::name).toList();
+        assertTrue(names.containsAll(List.of("kb-10", "kb-11", "kb-20")));
+    }
+
+    @Test
+    void listBases_userNoAccess_returnsEmptyPage() {
+        loginAs("bob", "USER");
+        when(kbRepository.findIdsByVisibility(KnowledgeBase.VISIBILITY_PUBLIC)).thenReturn(List.of());
+        when(resourceAccessService.visibleResourceIds(eq("bob"), any(), eq(ResourceAccessService.RESOURCE_KB)))
+                .thenReturn(Set.of());
+
+        PageVO<KnowledgeBaseVO> page = kbAdminService.listBases(null, 20);
+
+        assertEquals(0, page.items().size());
+        assertFalse(page.hasMore());
     }
 
     private RetrievalLog log(String topScore, long costMs, boolean rejected) {

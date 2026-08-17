@@ -7,7 +7,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * Embedding 配置（M5 T2），前缀 {@code hify.embedding}。
+ * Embedding 配置（M5 T2），前缀 {@code sayagent.embedding}。
  *
  * <p>大白话：维度 1024（与 pgvector 的 vector(1024) 一致）、相似度阈值 0.6（检索时过滤低于它的 chunk）、
  * 单切片最大字符 maxChunkSize=1000、一次 embed 调用最多 20 条 batchSize=20。带默认值，缺失也能跑。
@@ -18,7 +18,7 @@ import lombok.Setter;
  * {@code maxChunkSize} 是 T2 的纯长度粗切参数（与语义切块不是一回事），K3 语义切片器落地后由 {@code rag.chunk-size} 接管。
  */
 @Component
-@ConfigurationProperties(prefix = "hify.embedding")
+@ConfigurationProperties(prefix = "sayagent.embedding")
 @Getter
 @Setter
 public class EmbeddingConfig {

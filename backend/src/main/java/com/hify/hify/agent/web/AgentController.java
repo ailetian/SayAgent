@@ -1,9 +1,11 @@
 package com.hify.hify.agent.web;
 
+import com.hify.hify.agent.dto.AgentAccessGrantRequest;
 import com.hify.hify.agent.dto.AgentCreateRequest;
 import com.hify.hify.agent.dto.AgentUpdateRequest;
 import com.hify.hify.agent.dto.AgentVO;
 import com.hify.hify.agent.service.AgentService;
+import com.hify.hify.agent.service.AgentToolSensitivity;
 import com.hify.hify.common.Result;
 
 import jakarta.validation.Valid;
@@ -66,5 +68,25 @@ public class AgentController {
     @PostMapping("/{id}/default")
     public Result<AgentVO> setDefault(@PathVariable Long id) {
         return Result.ok(agentService.setDefault(id));
+    }
+
+    /**
+     * 列出某 Agent 携带的每个工具的「危险度 + 数据敏感度」快照（M10/T6，供授权页风险预览卡渲染）。
+     * 数据由后端聚合（经 mcp 接口），前端不自行计算（§3.2 后端为真相源）。
+     */
+    @GetMapping("/{id}/tools")
+    public Result<List<AgentToolSensitivity>> getAgentTools(@PathVariable Long id) {
+        return Result.ok(agentService.listToolSensitivity(id));
+    }
+
+    /**
+     * 授权某 Agent 给某主体（M10/T6，含风险摘要审计）。
+     * 后端计算该 Agent 携带的敏感工具摘要并写审计（§7.11 留痕），不信任前端标记（§4 后端硬闸）。
+     */
+    @PostMapping("/{id}/access")
+    public Result<Void> grantAccess(@PathVariable Long id,
+                                    @Valid @RequestBody AgentAccessGrantRequest request) {
+        agentService.grantAccess(id, request);
+        return Result.ok();
     }
 }

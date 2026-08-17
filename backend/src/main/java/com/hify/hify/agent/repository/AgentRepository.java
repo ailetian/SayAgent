@@ -3,8 +3,11 @@ package com.hify.hify.agent.repository;
 import com.hify.hify.agent.entity.Agent;
 import com.hify.hify.common.base.BaseRepository;
 
+import org.springframework.data.jpa.repository.Query;
+
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Agent 仓储（M4/T1，§3.2 后端包结构）。
@@ -25,4 +28,15 @@ public interface AgentRepository extends BaseRepository<Agent> {
 
     /** 同厂商下按名称查重（创建/改名时防重名）。 */
     Optional<Agent> findByModelProviderIdAndName(Long modelProviderId, String name);
+
+    /**
+     * T6 列表可见性过滤：取指定可见性的全部 Agent id（索引 idx_visibility 命中）。
+     */
+    @Query("SELECT a.id FROM Agent a WHERE a.visibility = ?1")
+    List<Long> findIdsByVisibility(String visibility);
+
+    /**
+     * T6 列表可见性过滤：按可见 id 集合倒序取（§6.4 keyset 的 HOME 端，Agent 列表本身无须翻页）。
+     */
+    List<Agent> findByIdInOrderByIdDesc(Set<Long> ids);
 }

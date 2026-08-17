@@ -41,4 +41,12 @@ public class User extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private UserRole role = UserRole.USER;
+
+    /** 显示名（V31 补列，§2.1 支撑 POST /api/users 契约；可空）。 */
+    @Column(length = 64)
+    private String displayName;
+
+    /** 邮箱（V31 补列，可空）。 */
+    @Column(length = 128)
+    private String email;
 }

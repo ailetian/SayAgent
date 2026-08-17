@@ -80,7 +80,7 @@ class HealthAndExceptionTest {
                 "PostgreSQL 向量库数据源 pgDataSource 应就绪");
         assertTrue(applicationContext.containsBean("redisTemplate"),
                 "Redis 模板 redisTemplate 应就绪");
-        assertTrue(applicationContext.containsBean("hifyOpenApi"),
+        assertTrue(applicationContext.containsBean("sayAgentOpenApi"),
                 "Swagger OpenAPI 文档 Bean 应就绪");
     }
 

@@ -33,6 +33,9 @@ public enum ErrorCode {
     /** 知识库被 Agent 挂载中，禁止删除（须先到对应 Agent 卸载，K0808 安全删除）。 */
     KNOWLEDGE_BASE_IN_USE(1005, "知识库已被 Agent 挂载，请先到对应 Agent 卸载后再删除"),
 
+    /** 用户名已存在（M9/T3 用户管理：建用户时 username 唯一校验失败）。 */
+    USERNAME_EXISTS(1006, "用户名已存在"),
+
     /** 入参校验失败（Bean Validation 抛出的异常会翻译成它）。 */
     PARAM_INVALID(4000, "参数校验失败"),
 

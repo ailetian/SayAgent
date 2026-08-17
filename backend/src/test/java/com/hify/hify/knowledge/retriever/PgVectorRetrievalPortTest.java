@@ -91,9 +91,9 @@ class PgVectorRetrievalPortTest {
         String sql = sqlCap.getValue().toLowerCase();
         assertTrue(sql.contains("1 - (embedding <=>"), "SQL 必须按余弦相似度（1 - 余弦距离）排序");
         assertTrue(sql.contains("document_id in (:"), "SQL 必须按 allowedDocIds 过滤孤儿 chunk（K11 缺陷 A）");
-        assertTrue(sql.contains("score >= "), "SQL 必须按相似度阈值过滤低于阈值的 chunk（T4 验收点3）");
+        assertTrue(sql.contains(">= :threshold"), "SQL 必须按相似度阈值过滤低于阈值的 chunk（T4 验收点3）");
         assertTrue(sql.contains("order by score desc"), "结果应降序");
-        assertTrue(sql.contains("limit ?"), "必须限制返回条数");
+        assertTrue(sql.contains("limit :limit"), "必须限制返回条数");
         assertEquals(1, result.size());
         assertEquals(0.91, result.get(0).score());
     }

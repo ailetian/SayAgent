@@ -41,18 +41,18 @@ class AgentControllerTest {
     /** AgentVO 是 record，用全参构造；这里只关心 id/name/defaultAgent，其余置 null。 */
     private AgentVO vo(Long id, String name, Boolean defaultAgent) {
         return new AgentVO(id, name, null, null, null, null, null, defaultAgent,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, 0L, 0L, null, null);
     }
 
     /** AgentCreateRequest/UpdateRequest 均为 record，用全参构造；仅填关心的字段。 */
     private AgentCreateRequest createReq(String name, Long modelProviderId) {
         return new AgentCreateRequest(name, null, null, modelProviderId, null, null, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     private AgentUpdateRequest updateReq(String name) {
         return new AgentUpdateRequest(name, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     @Test

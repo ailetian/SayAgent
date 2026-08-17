@@ -1,5 +1,6 @@
 package com.hify.hify.conversation.tool;
 
+import com.hify.hify.common.tool.RiskLevel;
 import com.hify.hify.common.tool.Tool;
 import com.hify.hify.common.tool.ToolCall;
 import com.hify.hify.common.tool.ToolDefinition;
@@ -99,6 +100,22 @@ public class ToolLoopRunner {
                     log.warn("tool loop unknown tool={} round={}", fn, round);
                     result = ToolResult.fail("未知工具：" + fn);
                 } else {
+                    // === M10/T5 执行闸：L2/L3 一期默认拒绝（§2 模块8 / §4.5 降级纪律） ===
+                    RiskLevel level = tool.riskLevel();
+                    if (level == RiskLevel.L2_IRREVERSIBLE || level == RiskLevel.L3_HIGH_RISK) {
+                        String blockMsg = "工具「" + fn + "」风险等级为 " + level + "（" + level.desc
+                                + "），需管理员确认，当前对话模式不支持自动执行。已拦截本次调用，未实际执行。";
+                        log.info("tool loop risk gate blocked tool={} level={} round={}", fn, level, round);
+                        // 一期策略：不进 execute，把提示作为 tool 角色消息塞回，让模型转告用户、循环继续（不抛异常）
+                        ctx.getTrace().add(new CallTrace("tool",
+                                "调用 " + fn + " 被风险闸拦截（" + level + "）",
+                                "blocked", null, null, fn, argsJson, "", false));
+                        stepSink.step("工具 " + fn + " 被风险闸拦截（" + level + "）", "done");
+                        ChatMessage blockedMsg = new ChatMessage("tool", blockMsg);
+                        blockedMsg.setToolCallId(tc.id());
+                        messages.add(blockedMsg);
+                        continue;
+                    }
                     try {
                         result = tool.execute(parseArgs(argsJson));
                     } catch (Exception e) {

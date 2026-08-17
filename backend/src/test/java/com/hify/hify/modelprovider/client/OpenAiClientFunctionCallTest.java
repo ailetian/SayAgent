@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OpenAiClientFunctionCallTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final OpenAiClient client = new OpenAiClient(new OkHttpClient());
+    private final OpenAiClient client = new OpenAiClient(new OkHttpClient(), new OkHttpClient());
 
     private ProviderConfig config() {
         return ProviderConfig.builder()

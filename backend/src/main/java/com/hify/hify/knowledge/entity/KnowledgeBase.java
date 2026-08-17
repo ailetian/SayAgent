@@ -47,6 +47,11 @@ public class KnowledgeBase extends BaseEntity {
             BigDecimal.valueOf(RagProperties.DEFAULT_SCORE_THRESHOLD)
                     .setScale(SIMILARITY_SCALE, RoundingMode.HALF_UP);
 
+    /** 可见性：全员可见（§2.1）。 */
+    public static final String VISIBILITY_PUBLIC = "PUBLIC";
+    /** 可见性：仅授权可见（默认，secure by default §2.1）。 */
+    public static final String VISIBILITY_RESTRICTED = "RESTRICTED";
+
     /** 知识库名称（必填，<=80 字）。 */
     @Column(name = "name", nullable = false, length = 80)
     private String name;
@@ -98,6 +103,13 @@ public class KnowledgeBase extends BaseEntity {
     /** 可否被挂载到 Agent（§3.5 预留），默认 true。 */
     @Column(name = "is_public", nullable = false, columnDefinition = "tinyint(1) default 1")
     private Boolean isPublic = true;
+
+    /**
+     * 可见性（T6 列表过滤的唯一真相源，§2.1）：PUBLIC=全员可见 / RESTRICTED=仅授权可见（默认）。
+     * V31 已为该列建索引 idx_visibility；列表过滤以本字段为准，与 isPublic 解耦（避免历史 is_public 语义歧义）。
+     */
+    @Column(name = "visibility", nullable = false, length = 20)
+    private String visibility = VISIBILITY_RESTRICTED;
 
     /**
      * 算出本知识库这次真正生效的 RAG 参数：库级 {@code rag_config} 有写的用库级，没写的回退全局默认（K2）。

@@ -16,6 +16,22 @@ public interface Tool {
     /** 工具名片：名字、能干嘛、需要什么入参（JSON Schema）。 */
     ToolDefinition getDefinition();
 
+    /**
+     * 工具危险度标签（M10/T3）：默认从定义读取，供 T5 执行闸与 T6 前端知情。
+     * 子类一般无需重写——直接读 getDefinition().riskLevel() 即可。
+     */
+    default RiskLevel riskLevel() {
+        return getDefinition().riskLevel();
+    }
+
+    /**
+     * 工具数据敏感度标签（M10/T4）：默认从定义读取，供 T5 执行闸组合判定与 T6 前端授权知情。
+     * 子类一般无需重写——直接读 getDefinition().dataSensitivity() 即可。
+     */
+    default DataSensitivity dataSensitivity() {
+        return getDefinition().dataSensitivity();
+    }
+
     /** 真正干活：入参是模型回传的参数表，返回成功/内容/错误。 */
     ToolResult execute(Map<String, Object> args);
 }

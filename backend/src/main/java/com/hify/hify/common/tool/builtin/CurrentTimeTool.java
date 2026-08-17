@@ -2,6 +2,7 @@ package com.hify.hify.common.tool.builtin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.hify.hify.common.tool.RiskLevel;
 import com.hify.hify.common.tool.Tool;
 import com.hify.hify.common.tool.ToolDefinition;
 import com.hify.hify.common.tool.ToolResult;
@@ -24,7 +25,8 @@ public class CurrentTimeTool implements Tool {
             "current-time",
             "返回当前的日期与时间，格式为 ISO8601（含时区偏移，如 2026-08-06T16:30:00+08:00）。"
                     + "当用户问及「现在几点」「今天日期」「当前时间」时使用。",
-            emptySchema());
+            emptySchema(),
+            RiskLevel.L0_READONLY_SAFE);
 
     /** 无参入参 schema：{"type":"object","properties":{}}（§3.5 强类型，复用 OpenAI function-calling 结构）。 */
     private static com.fasterxml.jackson.databind.JsonNode emptySchema() {

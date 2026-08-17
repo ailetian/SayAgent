@@ -45,7 +45,7 @@ class GeminiClientTest {
 
     @BeforeEach
     void setUp() {
-        client = new GeminiClient(okHttpClient);
+        client = new GeminiClient(okHttpClient, okHttpClient);
     }
 
     private void stub(int code, String body) throws IOException {
