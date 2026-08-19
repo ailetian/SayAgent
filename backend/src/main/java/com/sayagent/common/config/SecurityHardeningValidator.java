@@ -33,7 +33,7 @@ public class SecurityHardeningValidator implements ApplicationRunner {
 
     private static final String DEV_JWT_PLACEHOLDER = "dev-only-secret-key-please-change-in-prod-32bytes!!";
     private static final List<String> WEAK_SECRETS = List.of(
-            "hify", "sayagent", "root", "admin123", "admin", "password", "123456",
+            "sayagent", "root", "admin123", "admin", "password", "123456",
             "dev-only-secret-key-please-change-in-prod-32bytes!!");
 
     @Value("${SAYAGENT_PRODUCTION:false}")
