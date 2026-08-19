@@ -129,7 +129,7 @@ $env:SAYAGENT_JWT_SECRET="至少32字节的随机密钥"
 ## 目录结构
 
 ```
-hify/
+sayagent/
 ├── backend/          # Spring Boot 单体（Maven），com.sayagent
 ├── frontend/         # Vue 3 前端（Vite）
 ├── deploy/           # 部署相关（initdb / K8s 清单）
