@@ -36,7 +36,7 @@ class CommonConfigTest {
     }
 
     @Test
-    void testSwaggerOpenApi_buildBean_titleIsHifyApi() {
+    void testSwaggerOpenApi_buildBean_titleIsSayAgentApi() {
         OpenAPI api = new SwaggerConfig().sayAgentOpenApi();
         assertNotNull(api);
         assertNotNull(api.getInfo());

@@ -146,7 +146,7 @@ class AgentControllerTest {
 
     @Test
     void testController_importsOnlyAgentAndCommon_noModelproviderImport() throws IOException {
-        Path ctrl = Path.of("src/main/java/com/hify/hify/agent/web/AgentController.java");
+        Path ctrl = Path.of("src/main/java/com/sayagent/agent/web/AgentController.java");
         assertTrue(Files.exists(ctrl), "AgentController.java 应存在");
         List<String> modelproviderImports = Files.readAllLines(ctrl).stream()
                 .map(String::trim)

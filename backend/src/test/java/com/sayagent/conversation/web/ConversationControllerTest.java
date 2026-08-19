@@ -37,8 +37,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Import({SecurityConfig.class, JwtUtil.class})
 @TestPropertySource(properties = {
-        "hify.jwt.secret=test-secret-key-at-least-256-bits-long-for-hmac-sha256",
-        "hify.jwt.expiration-ms=7200000"
+        "sayagent.jwt.secret=test-secret-key-at-least-256-bits-long-for-hmac-sha256",
+        "sayagent.jwt.expiration-ms=7200000"
 })
 class ConversationControllerTest {
 

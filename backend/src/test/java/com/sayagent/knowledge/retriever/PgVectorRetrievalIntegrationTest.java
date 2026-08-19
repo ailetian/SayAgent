@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Pg 检索链路真实集成测试（替代原 mock 版 PgVectorRetrievalPortTest）。
  *
  * <p>大白话：@SpringBootTest 启动真实 Spring 上下文，PgSchemaMigrator 会自动对 docker 里的
- * PostgreSQL（hify_vector 库，hify 为超管）执行 PG Flyway —— 启用 vector 扩展并建 document_chunk 表。
+ * PostgreSQL（sayagent_vector 库，sayagent 为超管）执行 PG Flyway —— 启用 vector 扩展并建 document_chunk 表。
  * 本测试往真实表里插 1024 维向量，调用 PgVectorRetrievalPort.retrieve 跑真实的 {@code 1 - (embedding <=> ?::vector)}
  * 余弦查询，验证四件事：余弦降序、kb_id 隔离、阈值真正过滤、topK 限制。
  *

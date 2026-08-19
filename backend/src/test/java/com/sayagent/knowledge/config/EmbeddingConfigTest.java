@@ -11,7 +11,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * EmbeddingConfig 单元测试（M5 T2）：验证阈值/维度/批大小能从 hify.embedding 配置正确读取。
+ * EmbeddingConfig 单元测试（M5 T2）：验证阈值/维度/批大小能从 sayagent.embedding 配置正确读取。
  * 不加载 Spring 上下文，用 Binder 直接绑定 Map 配置（离线、可重复）。
  */
 class EmbeddingConfigTest {
@@ -19,14 +19,14 @@ class EmbeddingConfigTest {
     @Test
     void testBind_fromProperties_readsDimensionThresholdAndBatchSize() {
         Map<String, Object> props = new HashMap<>();
-        props.put("hify.embedding.dimension", "1024");
-        props.put("hify.embedding.similarity-threshold", "0.6");
-        props.put("hify.embedding.max-chunk-size", "1000");
-        props.put("hify.embedding.batch-size", "20");
+        props.put("sayagent.embedding.dimension", "1024");
+        props.put("sayagent.embedding.similarity-threshold", "0.6");
+        props.put("sayagent.embedding.max-chunk-size", "1000");
+        props.put("sayagent.embedding.batch-size", "20");
 
         MapConfigurationPropertySource source = new MapConfigurationPropertySource(props);
         EmbeddingConfig config = new Binder(source)
-                .bind("hify.embedding", Bindable.of(EmbeddingConfig.class))
+                .bind("sayagent.embedding", Bindable.of(EmbeddingConfig.class))
                 .get();
 
         assertEquals(1024, config.getDimension());
@@ -39,7 +39,7 @@ class EmbeddingConfigTest {
     void testDefaults_whenPropertiesAbsent_usesSafeDefaults() {
         MapConfigurationPropertySource source = new MapConfigurationPropertySource(new HashMap<>());
         EmbeddingConfig config = new Binder(source)
-                .bind("hify.embedding", Bindable.of(EmbeddingConfig.class))
+                .bind("sayagent.embedding", Bindable.of(EmbeddingConfig.class))
                 .orElseGet(EmbeddingConfig::new);
 
         assertEquals(1024, config.getDimension());

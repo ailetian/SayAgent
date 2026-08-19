@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>大白话：这是 M1 的"出厂检验"——证明两件事：
  * <ol>
- *   <li>整个 Spring 大容器能正常启动（{@code HifyApplication} 上下文就绪，核心 Bean 都在位）。</li>
+ *   <li>整个 Spring 大容器能正常启动（{@code SayAgentApplication} 上下文就绪，核心 Bean 都在位）。</li>
  *   <li>Controller 抛业务异常时，{@link com.sayagent.common.exception.GlobalExceptionHandler}
  *       能把它翻译成统一盒子 {@code {code, message, data}}，且 {@code code != 0}。</li>
  * </ol>
@@ -65,7 +65,7 @@ class HealthAndExceptionTest {
     private AdminSeedRunner adminSeedRunner;
 
     /**
-     * 验证 {@code HifyApplication} 整个 Spring 上下文能启动，且 M1 核心 Bean 就绪。
+     * 验证 {@code SayAgentApplication} 整个 Spring 上下文能启动，且 M1 核心 Bean 就绪。
      *
      * <p>预期：上下文非空，全局异常处理器、MySQL 主数据源、Redis 模板等关键 Bean 均已注册。
      */
