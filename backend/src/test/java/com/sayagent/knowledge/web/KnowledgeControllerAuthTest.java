@@ -110,7 +110,7 @@ class KnowledgeControllerAuthTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of(
-                                "kbId", 1, "query", "什么是 hify", "topK", 3))))
+                                "kbId", 1, "query", "什么是 sayagent", "topK", 3))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data").isArray());
