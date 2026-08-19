@@ -124,11 +124,13 @@ $env:SAYAGENT_ADMIN_PASSWORD="你的强口令"
 $env:SAYAGENT_JWT_SECRET="至少32字节的随机密钥"
 ```
 
+**新增「生产秘钥闸门」（P3 收口）**：在 `deploy/.env` 设置 `SAYAGENT_PRODUCTION=true` 后，若 JWT 秘钥 / 管理员密码 / 数据库密码仍为弱默认值，应用**启动即失败（fail-fast）**并给出整改提示，无法用弱口令上线。本地演示保持 `SAYAGENT_PRODUCTION=false`（仅打印告警，不阻断启动）。生成强秘钥示例：`openssl rand -base64 48`。
+
 ## 目录结构
 
 ```
 hify/
-├── backend/          # Spring Boot 单体（Maven），com.hify.hify
+├── backend/          # Spring Boot 单体（Maven），com.sayagent
 ├── frontend/         # Vue 3 前端（Vite）
 ├── deploy/           # 部署相关（initdb / K8s 清单）
 ├── doc/              # 对外设计文档（需求 / 选型 / 部署 / 架构 / 数据库规范）

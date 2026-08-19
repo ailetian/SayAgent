@@ -13,7 +13,7 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.hify</groupId>
+    <groupId>com.sayagent</groupId>
     <artifactId>sayagent-backend</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>sayagent-backend</name>

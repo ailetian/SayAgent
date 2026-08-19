@@ -81,7 +81,7 @@ npm run dev                # 开发服务器，默认 http://localhost:6177
 - 管理员默认账号/口令：`admin` / `admin123`
 - 开发用 JWT 密钥：`dev-only-secret-key-please-change-in-prod-32bytes!!`
 
-**任何对外部署务必修改 `deploy/.env`**：把 `SAYAGENT_ADMIN_PASSWORD` 改成强口令、`SAYAGENT_JWT_SECRET` 改成至少 32 字节的随机串，并修改 MySQL / PostgreSQL 密码。
+**任何对外部署务必修改 `deploy/.env`**：把 `SAYAGENT_ADMIN_PASSWORD` 改成强口令、`SAYAGENT_JWT_SECRET` 改成至少 32 字节的随机串，并修改 MySQL / PostgreSQL 密码；同时把 `SAYAGENT_PRODUCTION` 设为 `true` 以启用「生产秘钥闸门」——若仍残留弱默认秘钥/密码，应用启动直接失败（fail-fast），无法弱口令上线。生成强秘钥：`openssl rand -base64 48`。
 
 ---
 

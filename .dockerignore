@@ -1,0 +1,31 @@
+# 构建上下文收窄（backend 与 frontend 构建共用仓库根为 context）
+# 目标：排除重型 / 无关目录，但【必须保留】backend/、frontend/、deploy/ 源码，
+#       否则 frontend 镜像的 `COPY frontend/...` 会因上下文缺失而失败
+#       —— 这是「一键全栈起」能成功构建前端镜像的关键前提。
+
+# ---------- VCS / 个人工作区（构建无需）----------
+.git
+.workbuddy
+.codebuddy
+
+# ---------- 依赖（构建会在容器内自行安装，不进上下文）----------
+**/node_modules
+
+# ---------- 重型 / 无关目录 ----------
+_temp
+test-artifacts
+rag-knowledge
+doc
+plans
+acceptance
+www
+html
+rule
+
+# ---------- backend 内大体积产物（构建会从源码重打 jar，不需要旧的）----------
+backend/target
+backend/BOOT-INF
+backend/_tmp
+
+# ---------- 日志 ----------
+**/*.log
